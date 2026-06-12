@@ -119,19 +119,25 @@ export function triage(team, task) {
   const safeWords = team?.risk?.safeWords || [];
   const hitsSafeWord = safeWords.some((w) => text.includes(w.toLowerCase()));
 
+  // self-modification guard: a task aimed at the orchestrator itself (baleia/
+  // krill) is always high-risk and never bypasses — a bad self-edit can break
+  // the very automation running it.
+  const isSelfEdit = config.autonomy.protected.includes((task.project_key || "").toLowerCase());
+
   let risk_tier = "medium";
-  if (hitsSafeWord || HIGH_RE.test(text) || task.new_project) risk_tier = "high";
+  if (isSelfEdit || hitsSafeWord || HIGH_RE.test(text) || task.new_project) risk_tier = "high";
   else if (LOW_RE.test(text)) risk_tier = "low";
 
   const dial = config.autonomy.bypass;
   let bypass = false;
-  if (risk_tier === "low") bypass = true;
+  if (isSelfEdit) bypass = false;
+  else if (risk_tier === "low") bypass = true;
   else if (risk_tier === "medium" && dial === "aggressive") bypass = true;
   // high never bypasses
 
   const priority = risk_tier === "high" ? "P1" : risk_tier === "low" ? "P3" : "P2";
   const mode = DEV_RE.test(text) ? "dev" : "non-dev";
-  const why = hitsSafeWord ? "safe-word" : task.new_project ? "new-project" : HIGH_RE.test(text) ? "irreversible-keyword" : LOW_RE.test(text) ? "trivial" : "default";
+  const why = isSelfEdit ? "self-edit (orchestrator)" : hitsSafeWord ? "safe-word" : task.new_project ? "new-project" : HIGH_RE.test(text) ? "irreversible-keyword" : LOW_RE.test(text) ? "trivial" : "default";
   return {
     risk_tier,
     bypass,

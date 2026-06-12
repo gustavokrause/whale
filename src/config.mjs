@@ -22,6 +22,10 @@ export const config = {
     autoPush: process.env.BALEIA_AUTOPUSH === "1",
     // creating krill projects is ALWAYS gated; this only enables proposing them
     allowNewProjects: process.env.BALEIA_ALLOW_NEW_PROJECTS === "1",
+    // self-modification guard: tasks targeting the orchestrator itself always
+    // get 🔴 human review, never bypass (a bad self-edit can break automation).
+    protected: (process.env.BALEIA_PROTECTED || "baleia,krill")
+      .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
   },
 
   krill: { baseUrl: process.env.KRILL_URL || "http://localhost:3000" },

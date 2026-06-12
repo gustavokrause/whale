@@ -6,6 +6,7 @@
   "description": "Strategy brain on top of krill: capture → distill → plan → triage → execute.",
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.mjs",
-    "loader": "node --env-file-if-exists=.env src/persona-loader.mjs"
+    "loader": "node --env-file-if-exists=.env src/persona-loader.mjs",
+    "test": "node --test"
   }
 }
