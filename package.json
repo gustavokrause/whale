@@ -1,0 +1,10 @@
+{
+  "name": "baleia",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Strategy brain on top of krill: capture → distill → plan → triage → execute.",
+  "scripts": {
+    "loader": "node src/persona-loader.mjs"
+  }
+}
