@@ -8,7 +8,7 @@ bypasses, and drives krill to execute.
 > Krill feeds the whale. Krill runs tasks → PRs; baleia decides which tasks
 > exist, why, and who reviews them.
 
-See **[PLAN.md](PLAN.md)** for the full architecture and phased build.
+See **[PLAN.md](PLAN.md)** for the full architecture.
 
 ## Boundary
 
@@ -19,22 +19,57 @@ ai-team/  (personas, read-only)  ──▶  baleia  ──HTTP──▶  krill (
 One-way: baleia reads the personas, never writes them; talks to krill over its
 HTTP API, never its DB.
 
-## Phase 0 — persona-loader (done)
-
-Reads `ai-team/` → routing doctrine + risk rubric + persona registry.
+## Run
 
 ```bash
-npm run loader -- /path/to/ai-team
-# or: node src/persona-loader.mjs /path/to/ai-team
+npm start                 # http://localhost:4100  (LAN URL printed for phone)
 ```
 
-Prints the 14 personas (with full system prompts), the risk tiers, and the
-safe-words — the artifacts baleia's planner/router/triage consume.
+Tabs: **Inbox** (dump anything) · **Context** (living CONTEXT.md per project) ·
+**Proposed** (review queue — approve / reject / push).
 
-## Status
+Flow: dump → `Distill all` → open a project in Context → `Plan this` →
+review in Proposed → `Approve` → `Push to krill`.
+
+## Pipeline
+
+```
+dump ─▶ inbox ─▶ DISTILLER ─▶ CONTEXT.md (per project)
+                                   │
+                     PLANNER (Augusto + Maria) ─▶ proposed tasks
+                                   │
+                     TRIAGE (ai-team risk rubric) ─▶ 🟢 bypass / 🟡🔴 review
+                                   │
+                     krill POST /api/tasks (skip_plan_review = bypass)
+ROUTER: a raw dump ─▶ task | new_project (gated) | context | ask
+```
+
+Triage is **deterministic** — it reads the safe-words + risk tiers straight from
+`AGENTS.md`, so "payment + migration" → 🔴 review and "fix typo" → 🟢 bypass with
+no LLM needed.
+
+## Going real
+
+Default runner is `stub` (deterministic, no key — the whole spine runs offline).
+Flip to persona-driven Claude:
+
+```bash
+BALEIA_RUNNER=real ANTHROPIC_API_KEY=sk-... npm start
+```
+
+Dials (env): `BALEIA_BYPASS=conservative|balanced|aggressive`,
+`BALEIA_AUTOPUSH=1`, `BALEIA_ALLOW_NEW_PROJECTS=1`, `KRILL_URL`, `PERSONAS_DIR`.
+
+## Status — all phases (stub-runnable)
 
 - [x] Phase 0 — persona-loader (sync foundation)
-- [ ] Phase 1 — capture inbox + distiller + planner (thin slice, one project)
-- [ ] Phase 2 — triage automation (risk → krill skip flags)
-- [ ] Phase 3 — request router (across projects)
-- [ ] Phase 4 — new-project generation (gated) + autonomy dials
+- [x] Phase 1 — capture inbox + distiller + planner
+- [x] Phase 2 — triage (risk → krill skip flags) + krill HTTP push
+- [x] Phase 3 — request router (task / new_project / context / ask)
+- [x] Phase 4 — gates (new-project always human) + autonomy dials
+
+### Hardening left (real-mode)
+
+- Verify krill `POST /api/tasks` accepts `skip_*` + `priority` on create (else PATCH after).
+- Real planner/distiller quality pass once a key is wired (stub is heuristic).
+- `node:sqlite` is experimental (Node 22) — pin or swap if it churns.

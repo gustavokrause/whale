@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Strategy brain on top of krill: capture → distill → plan → triage → execute.",
   "scripts": {
+    "start": "node src/server.mjs",
     "loader": "node src/persona-loader.mjs"
   }
 }
