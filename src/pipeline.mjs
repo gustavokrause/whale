@@ -2,7 +2,7 @@
 // human gates (new-project always gated; high-risk never auto-pushes).
 
 import { config } from "./config.mjs";
-import { getProposed, updateProposed, projectKeys } from "./db.mjs";
+import { getProposed, updateProposed, projectKeys, setEntryLane } from "./db.mjs";
 import { distill, plan, route } from "./stages.mjs";
 import * as krill from "./krill-client.mjs";
 
@@ -14,12 +14,17 @@ export async function routeEntry(team, db, entryId) {
   const e = db.prepare(`SELECT * FROM inbox_entries WHERE id = ?`).get(entryId);
   if (!e) throw new Error("entry not found");
   const r = await route(team, e, projectKeys(db));
-  // Gate: proposing a new project is allowed only if the dial permits; creating
-  // it in krill is ALWAYS a separate human step.
-  if (r.dest === "new_project" && !config.autonomy.allowNewProjects) {
-    return { ...r, gated: true, note: "new-project proposals disabled (BALEIA_ALLOW_NEW_PROJECTS=1 to enable); creation stays human-gated regardless" };
+
+  // Act on the decision (no longer preview-only): persist the lane so the entry
+  // is filed.  task -> tagged to a project for distill/plan;  context -> memory
+  // only;  new_project -> HELD (creating a krill project stays a human step);
+  // ask -> flagged for the user to clarify.
+  const entry = setEntryLane(db, entryId, { lane: r.dest, projectHint: r.projectKey || null });
+
+  if (r.dest === "new_project") {
+    return { ...r, lane: r.dest, entry, gated: true, note: "held — review and create the krill project yourself before this becomes work" };
   }
-  return r;
+  return { ...r, lane: r.dest, entry };
 }
 
 export async function approve(team, db, id) {

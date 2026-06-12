@@ -3,15 +3,15 @@
 import path from "node:path";
 
 export const config = {
-  // LLM execution: 'stub' (deterministic, no key, default) | 'real' (Anthropic API)
+  // LLM execution: 'stub' (deterministic, default) | 'real' (spawns the
+  // Claude Code CLI — krill's model — using your Claude Code auth, no API key).
   runner: process.env.BALEIA_RUNNER || "stub",
 
-  // Model tiering per stage (Caio's call). Verify IDs against latest on real use.
+  // Model tiering per stage (CLI aliases). Triage is deterministic (no model).
   models: {
-    distill: process.env.BALEIA_MODEL_DISTILL || "claude-haiku-4-5-20251001",
-    plan: process.env.BALEIA_MODEL_PLAN || "claude-sonnet-4-6",
-    triage: process.env.BALEIA_MODEL_TRIAGE || "claude-opus-4-8",
-    route: process.env.BALEIA_MODEL_ROUTE || "claude-sonnet-4-6",
+    distill: process.env.BALEIA_MODEL_DISTILL || "haiku",
+    plan: process.env.BALEIA_MODEL_PLAN || "sonnet",
+    route: process.env.BALEIA_MODEL_ROUTE || "sonnet",
   },
 
   // Autonomy dials (start conservative; loosen as override rate drops).

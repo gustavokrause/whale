@@ -49,12 +49,14 @@ async function distillReal(team, key, prior, group) {
   const system =
     `${caio?.systemPrompt || ""}\n\nYou maintain a living CONTEXT.md for project "${key}". ` +
     `Merge new notes into a structured doc with sections: Goals, Constraints, Decisions, Open questions. ` +
-    `Keep it tight; drop noise; preserve prior decisions.`;
+    `Keep it tight; drop noise; preserve prior decisions.\n\n` +
+    `OUTPUT CONTRACT: return ONLY the raw markdown of the file, starting with the line ` +
+    `"# CONTEXT — ${key}". No preamble, no summary of what you changed, no code fences, no commentary.`;
   const user =
-    `EXISTING CONTEXT:\n${prior || "(none)"}\n\nNEW NOTES:\n` +
+    `EXISTING CONTEXT.md:\n${prior || "(none yet)"}\n\nNEW NOTES TO MERGE IN:\n` +
     group.map((e) => `- ${e.text}`).join("\n") +
-    `\n\nReturn the full updated CONTEXT.md.`;
-  return complete({ system, user, model: config.models.distill, maxTokens: 2000 });
+    `\n\nNow output the complete updated CONTEXT.md and nothing else.`;
+  return complete({ system, user, model: config.models.distill });
 }
 
 /* ---------- PLANNER: CONTEXT -> proposed tasks (Augusto + Maria) ---------- */

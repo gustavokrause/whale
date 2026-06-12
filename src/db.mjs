@@ -17,7 +17,8 @@ export function openDb(dbPath) {
       text         TEXT NOT NULL,
       source       TEXT NOT NULL DEFAULT 'manual',
       project_hint TEXT,
-      status       TEXT NOT NULL DEFAULT 'raw',   -- raw | distilled | routed
+      status       TEXT NOT NULL DEFAULT 'raw',   -- raw | distilled
+      lane         TEXT,                          -- router decision: task | context | new_project | ask
       created_at   INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS inbox_created_idx ON inbox_entries(created_at);
@@ -63,6 +64,15 @@ export const rawEntries = (db) =>
 export function markEntries(db, ids, status) {
   const stmt = db.prepare(`UPDATE inbox_entries SET status = ? WHERE id = ?`);
   for (const id of ids) stmt.run(status, id);
+}
+/** Persist the router's decision: set the lane, and fill project_hint if empty. */
+export function setEntryLane(db, id, { lane, projectHint = null }) {
+  db.prepare(
+    `UPDATE inbox_entries
+       SET lane = ?, project_hint = COALESCE(NULLIF(TRIM(project_hint),''), ?)
+     WHERE id = ?`
+  ).run(lane, projectHint, id);
+  return getEntry(db, id);
 }
 /** distinct project keys seen in the inbox (null hint => 'global') */
 export const projectKeys = (db) =>

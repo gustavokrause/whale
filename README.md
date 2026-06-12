@@ -22,8 +22,12 @@ HTTP API, never its DB.
 ## Run
 
 ```bash
+cp .env.example .env      # optional — set runner, dials, ports (gitignored)
 npm start                 # http://localhost:4100  (LAN URL printed for phone)
 ```
+
+`.env` is loaded natively (Node 22, no deps). All knobs documented in
+[.env.example](.env.example).
 
 Tabs: **Inbox** (dump anything) · **Context** (living CONTEXT.md per project) ·
 **Proposed** (review queue — approve / reject / push).
@@ -50,12 +54,17 @@ no LLM needed.
 
 ## Going real
 
-Default runner is `stub` (deterministic, no key — the whole spine runs offline).
-Flip to persona-driven Claude:
+Default runner is `stub` (deterministic — the whole spine runs offline).
+Flip to persona-driven Claude. baleia mirrors krill: it spawns the **Claude Code
+CLI** (`claude`), using your existing Claude Code auth — **no API key, no
+separate billing**.
 
 ```bash
-BALEIA_RUNNER=real ANTHROPIC_API_KEY=sk-... npm start
+BALEIA_RUNNER=real npm start            # requires the `claude` CLI installed + authed
 ```
+
+Distiller/planner/router then run real Claude (Haiku/Sonnet); triage stays
+deterministic. Set `CLAUDE_BIN` if `claude` isn't on PATH.
 
 Dials (env): `BALEIA_BYPASS=conservative|balanced|aggressive`,
 `BALEIA_AUTOPUSH=1`, `BALEIA_ALLOW_NEW_PROJECTS=1`, `KRILL_URL`, `PERSONAS_DIR`.

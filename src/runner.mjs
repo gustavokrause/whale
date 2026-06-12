@@ -1,40 +1,73 @@
-// baleia — LLM runner. Real = Anthropic Messages API (zero-dep fetch).
-// Stub callers don't reach here; each stage owns its deterministic fallback.
+// baleia — LLM runner. Mirrors krill: spawns the Claude Code CLI (`claude`),
+// using your Claude Code auth. No API key, no separate billing line.
+//
+// Stub callers never reach here; each stage owns its deterministic fallback.
 
-import { config } from "./config.mjs";
+import { spawn } from "node:child_process";
 
-/** Call Claude, return raw text. */
-export async function complete({ system, user, model, maxTokens = 1500 }) {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error("ANTHROPIC_API_KEY unset (BALEIA_RUNNER=real)");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: model || config.models.plan,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: user }],
-    }),
-  });
-  if (!res.ok) throw new Error(`anthropic ${res.status}: ${await res.text()}`);
-  const json = await res.json();
-  return (json.content || []).map((b) => b.text || "").join("");
+const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
+const TIMEOUT_MS = Number(process.env.BALEIA_CLAUDE_TIMEOUT || 120000);
+
+/** Map any model id/alias to a CLI-accepted alias. */
+function aliasFor(model) {
+  const m = (model || "").toLowerCase();
+  if (m.includes("haiku")) return "haiku";
+  if (m.includes("opus")) return "opus";
+  if (m.includes("sonnet")) return "sonnet";
+  return model || "sonnet";
 }
 
-/** Call Claude and parse a JSON object/array from the reply. */
-export async function completeJSON({ system, user, model, maxTokens = 1500 }) {
+/** Run `claude` headless: full prompt via stdin, text out. */
+export function complete({ system, user, model }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      CLAUDE_BIN,
+      [
+        "--model", aliasFor(model),
+        "--print",
+        "--output-format", "text",
+        // pure text generation — block every side-effecting tool so the model
+        // returns its answer instead of writing files (it was creating a stray
+        // CONTEXT.md). Read-only tools left harmless.
+        "--disallowed-tools", "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "WebFetch", "WebSearch",
+        "--dangerously-skip-permissions",
+      ],
+      { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }
+    );
+
+    let out = "", err = "";
+    child.stdout.on("data", (b) => (out += b.toString()));
+    child.stderr.on("data", (b) => (err += b.toString()));
+
+    const killer = setTimeout(() => {
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 3000);
+    }, TIMEOUT_MS);
+
+    child.on("error", (e) =>
+      (clearTimeout(killer),
+      reject(new Error(`claude spawn failed: ${e.message} — is the Claude Code CLI installed/authed? (set CLAUDE_BIN)`)))
+    );
+    child.on("exit", (code, signal) => {
+      clearTimeout(killer);
+      if (signal) return reject(new Error(`claude killed (${signal})`));
+      if (code !== 0) return reject(new Error(`claude exited ${code}: ${err.trim().slice(0, 300)}`));
+      resolve(out.trim());
+    });
+
+    child.stdin.write(`${system}\n\n${user}`);
+    child.stdin.end();
+  });
+}
+
+/** Run `claude` and parse a JSON object/array from the reply. */
+export async function completeJSON({ system, user, model }) {
   const text = await complete({
     system,
     user: `${user}\n\nRespond with ONLY valid JSON, no prose, no markdown fences.`,
     model,
-    maxTokens,
   });
   const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-  if (!match) throw new Error(`no JSON in model reply: ${text.slice(0, 200)}`);
+  if (!match) throw new Error(`no JSON in claude reply: ${text.slice(0, 200)}`);
   return JSON.parse(match[0]);
 }
