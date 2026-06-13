@@ -2,18 +2,55 @@
 // human gates (new-project always gated; high-risk never auto-pushes).
 
 import { config } from "./config.mjs";
-import { getProposed, updateProposed, projectKeys, setEntryLane } from "./db.mjs";
-import { distill, plan, route } from "./stages.mjs";
+import { getProposed, updateProposed, projectKeys, setEntryLane, rawEntries } from "./db.mjs";
+import { distill, plan, route, triage } from "./stages.mjs";
 import * as krill from "./krill-client.mjs";
 
-export const distillAll = (team, db) => distill(team, db);
+export async function distillAll(team, db) {
+  await autoRouteUntagged(team, db); // give untagged entries a project before they pile into 'global'
+  return distill(team, db);
+}
+
+// Route raw entries that have no project yet, so a clearly-about-X dump lands in
+// X instead of the unpushable 'global' bucket. Only acts when the router finds a
+// real project; ambiguous ones stay for manual routing.
+async function autoRouteUntagged(team, db) {
+  const untagged = rawEntries(db).filter((e) => !(e.project_hint || "").trim() && !e.lane);
+  if (!untagged.length) return;
+  const keys = await knownKeys(db);
+  for (const e of untagged) {
+    try {
+      const r = await route(team, e, keys);
+      setEntryLane(db, e.id, { lane: r.dest, projectHint: r.dest === "task" ? r.projectKey || null : null });
+    } catch { /* leave for manual routing */ }
+  }
+}
+
+/** Real project targets the router can pick from: baleia's own keys + krill's. */
+async function knownKeys(db) {
+  return [...new Set([...projectKeys(db), ...(await krill.projectKeys())])];
+}
+
+/** Move a proposed task to a different project and re-triage it (risk may change
+ *  — e.g. reassigning to baleia/krill triggers the self-edit guard). */
+export function reassign(team, db, id, projectKey) {
+  const t = getProposed(db, id);
+  if (!t) throw new Error("proposed task not found");
+  const tri = triage(team, { name: t.name, description: t.description, project_key: projectKey });
+  return updateProposed(db, id, {
+    project_key: projectKey,
+    risk_tier: tri.risk_tier, bypass: tri.bypass ? 1 : 0,
+    priority: tri.priority, mode: tri.mode, rationale: tri.rationale,
+    status: "proposed", push_error: null,
+  });
+}
 
 export const planProject = (team, db, key) => plan(team, db, key);
 
 export async function routeEntry(team, db, entryId) {
   const e = db.prepare(`SELECT * FROM inbox_entries WHERE id = ?`).get(entryId);
   if (!e) throw new Error("entry not found");
-  const r = await route(team, e, projectKeys(db));
+  const r = await route(team, e, await knownKeys(db));
 
   // Act on the decision (no longer preview-only): persist the lane so the entry
   // is filed.  task -> tagged to a project for distill/plan;  context -> memory
@@ -46,6 +83,13 @@ export async function push(db, id) {
   if (!(await krill.ping())) {
     const f = updateProposed(db, id, { status: "push_failed", push_error: "krill unreachable" });
     return { task: f, pushed: false, error: "krill unreachable" };
+  }
+  if ((t.project_key || "").toLowerCase() === "global") {
+    const f = updateProposed(db, id, {
+      status: "push_failed",
+      push_error: `"global" is a cross-cutting bucket, not a project — reassign this task to a real project before pushing`,
+    });
+    return { task: f, pushed: false, error: f.push_error };
   }
   try {
     const projectId = await krill.resolveProjectId(t.project_key);

@@ -105,13 +105,18 @@ async function loadProposed(){const {proposed}=await j('/api/proposed');const el
     (p.bypass?'<span class="pill by">bypass review</span>':'<span class="pill">needs your review</span>')+
     '<span class="pill">'+p.status+'</span><span class="pill">'+esc(p.project_key)+'</span></div>'+
     '<div class="meta">'+esc(p.rationale||'')+(p.push_error?' · ⚠ '+esc(p.push_error):'')+'</div>'+
-    (p.status==='proposed'?'<div class="row" style="margin-top:8px">'+
-      '<button class="act" onclick="pAct(\\''+p.id+'\\',\\'approve\\')" title="Accept this task. With autoPush off it stages for a manual push.">Approve</button>'+
-      '<button class="ghost danger" onclick="pAct(\\''+p.id+'\\',\\'reject\\')" title="Discard this proposal.">Reject</button></div>':
-     p.status==='approved'?'<div class="row" style="margin-top:8px"><button class="act" onclick="pAct(\\''+p.id+'\\',\\'push\\')" title="Send to krill as a BACKLOG task (carries the bypass flag).">Push to krill</button></div>':'')+
+    (p.status!=='pushed'?'<div class="row" style="margin-top:8px">'+
+      (p.status==='proposed'?'<button class="act" onclick="pAct(\\''+p.id+'\\',\\'approve\\')" title="Accept this task. With autoPush off it stages for a manual push.">Approve</button>'+
+        '<button class="ghost danger" onclick="pAct(\\''+p.id+'\\',\\'reject\\')" title="Discard this proposal.">Reject</button>':'')+
+      (p.status==='approved'?'<button class="act" onclick="pAct(\\''+p.id+'\\',\\'push\\')" title="Send to krill as a BACKLOG task (carries the bypass flag).">Push to krill</button>':'')+
+      '<button class="ghost" onclick="reassignTask(\\''+p.id+'\\')" title="Move to a different project and re-triage (re-runs risk + self-edit guard).">Reassign</button>'+
+      '</div>':'')+
     '</li>').join('')+'</ul>';}
 async function pAct(id,a){const r=await j('/api/proposed/'+id+'/'+a,{method:'POST'});
   if(r.error)alert('⚠ '+r.error); else if(r.note)alert(r.note); else if(r.pushed)alert('Pushed to krill as '+(r.task&&r.task.krill_task_id||'?')); loadProposed();}
+async function reassignTask(id){const k=prompt('Reassign to which project? (e.g. baleia, krill, arqtrack, mv)'); if(!k)return;
+  const r=await j('/api/proposed/'+id+'/reassign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_key:k.trim()})});
+  if(r.error)alert('⚠ '+r.error); loadProposed();}
 
 status();loadInbox();
 document.getElementById('t').addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter')dump();});

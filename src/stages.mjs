@@ -150,7 +150,7 @@ export function triage(team, task) {
 /* ---------- ROUTER: a raw entry -> destination (Phase 3) ---------- */
 
 export async function route(team, entry, knownKeys = []) {
-  return isReal() ? routeReal(team, entry) : routeStub(entry, knownKeys);
+  return isReal() ? routeReal(team, entry, knownKeys) : routeStub(entry, knownKeys);
 }
 
 function routeStub(entry, knownKeys) {
@@ -167,14 +167,17 @@ function routeStub(entry, knownKeys) {
   return { dest: "task", projectKey: "global", reason: "default to task" };
 }
 
-async function routeReal(team, entry) {
+async function routeReal(team, entry, knownKeys = []) {
   const caio = persona(team, "Caio");
   const system =
     `${caio?.systemPrompt || ""}\n\nClassify the input into one destination: ` +
     `"task" (work in an existing project), "new_project" (proposes a new project — gated), ` +
     `"context" (just info), or "ask" (ambiguous). ` +
-    `Return {dest, projectKey?, question?, reason}.`;
-  const user = `INPUT: ${entry.text}\nPROJECT HINT: ${entry.project_hint || "(none)"}`;
+    `When dest="task", projectKey MUST be one of the KNOWN PROJECTS below (match by topic); ` +
+    `if none fit, use "new_project". Return {dest, projectKey?, question?, reason}.`;
+  const user =
+    `KNOWN PROJECTS: ${knownKeys.length ? knownKeys.join(", ") : "(none yet)"}\n` +
+    `INPUT: ${entry.text}\nPROJECT HINT: ${entry.project_hint || "(none)"}`;
   return completeJSON({ system, user, model: config.models.route, maxTokens: 400 });
 }
 

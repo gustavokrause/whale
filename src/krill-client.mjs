@@ -31,6 +31,15 @@ export async function listProjects() {
   return Array.isArray(r) ? r : r?.projects || [];
 }
 
+/** Normalized project keys from krill (so the router can pick real targets). */
+export async function projectKeys() {
+  try {
+    return (await listProjects()).map((p) => keyToSlug(p.name));
+  } catch {
+    return [];
+  }
+}
+
 /** Resolve a baleia project_key to a krill project id by slug/name match. */
 export async function resolveProjectId(projectKey) {
   const want = keyToSlug(projectKey);
