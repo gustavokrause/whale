@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
-const TIMEOUT_MS = Number(process.env.BALEIA_CLAUDE_TIMEOUT || 120000);
+const TIMEOUT_MS = Number(process.env.BALEIA_CLAUDE_TIMEOUT || 240000);
 
 /** Map any model id/alias to a CLI-accepted alias. */
 function aliasFor(model) {
@@ -26,10 +26,10 @@ export function complete({ system, user, model }) {
         "--model", aliasFor(model),
         "--print",
         "--output-format", "text",
-        // pure text generation — block every side-effecting tool so the model
+        // pure text generation — block the file-writing/shell tools so the model
         // returns its answer instead of writing files (it was creating a stray
-        // CONTEXT.md). Read-only tools left harmless.
-        "--disallowed-tools", "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "WebFetch", "WebSearch",
+        // CONTEXT.md). Only valid tool names (the CLI rejects unknown ones).
+        "--disallowed-tools", "Write", "Edit", "Bash",
         "--dangerously-skip-permissions",
       ],
       { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }

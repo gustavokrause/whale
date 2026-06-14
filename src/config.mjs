@@ -11,7 +11,7 @@ export const config = {
   models: {
     distill: process.env.BALEIA_MODEL_DISTILL || "haiku",
     plan: process.env.BALEIA_MODEL_PLAN || "sonnet",
-    route: process.env.BALEIA_MODEL_ROUTE || "sonnet",
+    route: process.env.BALEIA_MODEL_ROUTE || "haiku",
   },
 
   // Autonomy dials (start conservative; loosen as override rate drops).
