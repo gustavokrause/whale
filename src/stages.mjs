@@ -120,7 +120,7 @@ const HIGH_RE = /\b(delete|drop|migration|schema|deploy|prod|production|payment|
 const LOW_RE = /\b(typo|rename|comment|docs?|readme|copy|wording|lint|format|tidy|cleanup)\b/i;
 const DEV_RE = /\b(code|repo|refactor|bug|api|endpoint|component|migration|schema|deploy|test|build|function|class)\b/i;
 
-export function triage(team, task) {
+export function triage(team, task, dial = config.autonomy.bypass) {
   const text = `${task.name} ${task.description || ""}`.toLowerCase();
   const safeWords = team?.risk?.safeWords || [];
   const hitsSafeWord = safeWords.some((w) => text.includes(w.toLowerCase()));
@@ -134,12 +134,17 @@ export function triage(team, task) {
   if (isSelfEdit || hitsSafeWord || HIGH_RE.test(text) || task.new_project) risk_tier = "high";
   else if (LOW_RE.test(text)) risk_tier = "low";
 
-  const dial = config.autonomy.bypass;
+  // Autonomy ladder (B1): the dial sets how far a task runs before it hits you.
+  // bypass = skip the human PLAN-review gate (krill skip_plan_review).
+  //   conservative: nothing bypasses (everything reviewed)
+  //   balanced:     low bypasses; medium reviewed
+  //   aggressive:   low + medium bypass
+  // high / self-edit: never bypass, any dial.
   let bypass = false;
-  if (isSelfEdit) bypass = false;
-  else if (risk_tier === "low") bypass = true;
-  else if (risk_tier === "medium" && dial === "aggressive") bypass = true;
-  // high never bypasses
+  if (!isSelfEdit && risk_tier !== "high") {
+    if (risk_tier === "low") bypass = dial === "balanced" || dial === "aggressive";
+    else if (risk_tier === "medium") bypass = dial === "aggressive";
+  }
 
   const priority = risk_tier === "high" ? "P1" : risk_tier === "low" ? "P3" : "P2";
   const mode = DEV_RE.test(text) ? "dev" : "non-dev";
@@ -149,7 +154,7 @@ export function triage(team, task) {
     bypass,
     priority,
     mode,
-    rationale: `${risk_tier} (${why}); dial=${dial} -> ${bypass ? "bypass" : "human review"}`,
+    rationale: `${risk_tier} (${why}); dial=${dial} -> ${bypass ? "bypass plan review" : "human review"}`,
   };
 }
 

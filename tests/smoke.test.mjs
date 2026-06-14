@@ -60,21 +60,41 @@ test("triage classifies risk correctly", () => {
   const t = (name, project_key) => triage(team, { name, description: "", project_key });
 
   assert.equal(t("fix typo in readme", "arqtrack").risk_tier, "low");
-  assert.equal(t("fix typo in readme", "arqtrack").bypass, true);
   assert.equal(t("add a db migration", "arqtrack").risk_tier, "high", "irreversible keyword");
   assert.equal(t("change the pricing tier", "arqtrack").risk_tier, "high", "safe-word");
   assert.equal(t("build a maintenance log", "mv").risk_tier, "medium", "default");
 });
 
-test("self-edit guard: orchestrator tasks never bypass", () => {
+test("autonomy ladder: dial controls how far a task bypasses (B1)", () => {
   const team = { risk: { safeWords: [] } };
-  // a trivial task that WOULD normally bypass...
-  const other = triage(team, { name: "fix typo", description: "", project_key: "arqtrack" });
-  assert.equal(other.bypass, true);
-  // ...is forced to high + review when it targets the orchestrator
+  const bypass = (name, key, dial) => triage(team, { name, description: "", project_key: key }, dial).bypass;
+  const low = "fix typo";            // low risk
+  const med = "build a feature";     // medium (default)
+
+  // conservative: nothing bypasses
+  assert.equal(bypass(low, "arqtrack", "conservative"), false);
+  assert.equal(bypass(med, "arqtrack", "conservative"), false);
+  // balanced: low bypasses, medium reviewed
+  assert.equal(bypass(low, "arqtrack", "balanced"), true);
+  assert.equal(bypass(med, "arqtrack", "balanced"), false);
+  // aggressive: low + medium bypass
+  assert.equal(bypass(low, "arqtrack", "aggressive"), true);
+  assert.equal(bypass(med, "arqtrack", "aggressive"), true);
+});
+
+test("self-edit guard: orchestrator tasks never bypass, any dial", () => {
+  const team = { risk: { safeWords: [] } };
+  // under aggressive a non-self-edit low WOULD bypass...
+  assert.equal(
+    triage(team, { name: "fix typo", description: "", project_key: "arqtrack" }, "aggressive").bypass,
+    true,
+  );
+  // ...but a self-edit is forced to high + review regardless of dial
   for (const key of config.autonomy.protected) {
-    const self = triage(team, { name: "fix typo", description: "", project_key: key });
-    assert.equal(self.risk_tier, "high", `${key} self-edit is high risk`);
-    assert.equal(self.bypass, false, `${key} self-edit never bypasses`);
+    for (const dial of ["conservative", "balanced", "aggressive"]) {
+      const self = triage(team, { name: "fix typo", description: "", project_key: key }, dial);
+      assert.equal(self.risk_tier, "high", `${key} self-edit is high risk`);
+      assert.equal(self.bypass, false, `${key} self-edit never bypasses (${dial})`);
+    }
   }
 });
