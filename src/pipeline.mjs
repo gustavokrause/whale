@@ -3,7 +3,7 @@
 
 import { homedir } from "node:os";
 import { config } from "./config.mjs";
-import { getProposed, updateProposed, projectKeys, setEntryLane, rawEntries } from "./db.mjs";
+import { getProposed, updateProposed, projectKeys, setEntryLane, rawEntries, listProposed } from "./db.mjs";
 import { distill, plan, route, triage } from "./stages.mjs";
 import { auditComplete } from "./runner.mjs";
 import { writeContext } from "./context-store.mjs";
@@ -90,6 +90,65 @@ export async function routeEntry(team, db, entryId) {
     return { ...r, lane: r.dest, entry, gated: true, note: "held — review and create the krill project yourself before this becomes work" };
   }
   return { ...r, lane: r.dest, entry };
+}
+
+/**
+ * Batch push (B2): push all pushable tasks for a project to krill in dependency
+ * order, wiring krill `depends_on` from the planner's sibling-name deps so "new
+ * builds on finished". Topo-sorted; cycles fall back to insertion order.
+ */
+export async function pushBatch(team, db, projectKey) {
+  if ((projectKey || "").toLowerCase() === "global")
+    return { ok: false, error: "'global' is not a project — reassign tasks first" };
+  if (!(await krill.ping())) return { ok: false, error: "krill unreachable" };
+  const projectId = await krill.resolveProjectId(projectKey);
+  if (!projectId) return { ok: false, error: `no krill project for "${projectKey}" (create it first)` };
+
+  const items = listProposed(db).filter(
+    (t) => t.project_key === projectKey && ["proposed", "approved", "push_failed"].includes(t.status)
+  );
+  if (!items.length) return { ok: true, pushed: 0, results: [] };
+
+  const byName = new Map(items.map((t) => [t.name, t]));
+  const ordered = topoByDeps(items, byName);
+  const nameToId = {};
+  const results = [];
+  for (const t of ordered) {
+    const depIds = JSON.parse(t.deps || "[]").map((n) => nameToId[n]).filter(Boolean);
+    try {
+      const created = await krill.createTask({
+        project_id: projectId,
+        name: t.name, description: t.description, priority: t.priority, mode: t.mode,
+        skip_plan_review: t.bypass && t.risk_tier !== "high",
+        auto_publish: !!t.auto_publish && t.risk_tier === "low",
+        depends_on: depIds,
+      });
+      const kid = created?.task?.id || created?.id || null;
+      nameToId[t.name] = kid;
+      updateProposed(db, t.id, { status: "pushed", krill_task_id: kid, push_error: null });
+      results.push({ name: t.name, id: kid, depends_on: depIds });
+    } catch (err) {
+      updateProposed(db, t.id, { status: "push_failed", push_error: err.message });
+      results.push({ name: t.name, error: err.message });
+    }
+  }
+  return { ok: true, pushed: results.filter((r) => r.id).length, total: items.length, results };
+}
+
+function topoByDeps(items, byName) {
+  const visited = new Set();
+  const out = [];
+  const visit = (t) => {
+    if (visited.has(t.name)) return;
+    visited.add(t.name);
+    for (const d of JSON.parse(t.deps || "[]")) {
+      const dep = byName.get(d);
+      if (dep) visit(dep);
+    }
+    out.push(t);
+  };
+  for (const t of items) visit(t);
+  return out;
 }
 
 export async function approve(team, db, id) {

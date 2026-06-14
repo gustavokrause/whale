@@ -34,6 +34,7 @@ export function openDb(dbPath) {
       rationale     TEXT NOT NULL DEFAULT '',
       bypass        INTEGER NOT NULL DEFAULT 0,    -- 1 => skip_plan_review in krill
       auto_publish  INTEGER NOT NULL DEFAULT 0,    -- 1 => krill auto_publish (auto-finish; A2)
+      deps          TEXT NOT NULL DEFAULT '[]',    -- JSON: names of sibling tasks this depends on (B2)
       status        TEXT NOT NULL DEFAULT 'proposed', -- proposed|approved|rejected|pushed|push_failed
       krill_task_id TEXT,
       push_error    TEXT,
@@ -41,8 +42,9 @@ export function openDb(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS proposed_status_idx ON proposed_tasks(status);
   `);
-  // idempotent migration for pre-A2 databases
+  // idempotent migrations for pre-existing databases
   try { db.exec(`ALTER TABLE proposed_tasks ADD COLUMN auto_publish INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE proposed_tasks ADD COLUMN deps TEXT NOT NULL DEFAULT '[]'`); } catch { /* exists */ }
   return db;
 }
 
@@ -90,11 +92,12 @@ export function addProposed(db, t) {
   const id = randomUUID();
   db.prepare(
     `INSERT INTO proposed_tasks
-       (id, project_key, name, description, priority, mode, risk_tier, rationale, bypass, auto_publish, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?)`
+       (id, project_key, name, description, priority, mode, risk_tier, rationale, bypass, auto_publish, deps, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?)`
   ).run(
     id, t.project_key, t.name, t.description || "", t.priority || "P2",
-    t.mode || "non-dev", t.risk_tier || null, t.rationale || "", t.bypass ? 1 : 0, t.auto_publish ? 1 : 0, Date.now()
+    t.mode || "non-dev", t.risk_tier || null, t.rationale || "", t.bypass ? 1 : 0, t.auto_publish ? 1 : 0,
+    JSON.stringify(Array.isArray(t.deps) ? t.deps : []), Date.now()
   );
   return getProposed(db, id);
 }

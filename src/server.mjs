@@ -11,7 +11,7 @@ import { openDb, addEntry, listEntries } from "./db.mjs";
 import { listProposed } from "./db.mjs";
 import { loadTeam } from "./persona-loader.mjs";
 import { readContext, listContextKeys } from "./context-store.mjs";
-import { distillAll, planProject, approve, reject, push, routeEntry, reassign, onboard } from "./pipeline.mjs";
+import { distillAll, planProject, approve, reject, push, routeEntry, reassign, onboard, pushBatch } from "./pipeline.mjs";
 import { PAGE } from "./ui.mjs";
 
 const PORT = Number(process.env.BALEIA_PORT || 4100);
@@ -78,6 +78,13 @@ const server = createServer(async (req, res) => {
       const b = await readJson(req);
       if (!b.key) return send(res, 400, { error: "key required" });
       return send(res, 200, { proposed: await planProject(await getTeam(), db, b.key) });
+    }
+
+    // batch push (B2): push all pushable tasks for a project in dependency order
+    if (method === "POST" && url.pathname === "/api/proposed/push-batch") {
+      const b = await readJson(req);
+      if (!b.key) return send(res, 400, { error: "key required" });
+      return send(res, 200, await pushBatch(await getTeam(), db, b.key));
     }
 
     // proposed

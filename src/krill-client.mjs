@@ -60,7 +60,7 @@ export async function resolveProjectId(projectKey) {
 }
 
 /** Create a BACKLOG task. skip_plan_review carries baleia's bypass decision. */
-export async function createTask({ project_id, name, description, priority, mode, skip_plan_review, auto_publish }) {
+export async function createTask({ project_id, name, description, priority, mode, skip_plan_review, auto_publish, depends_on }) {
   return call("POST", "/api/tasks", {
     project_id,
     name,
@@ -69,6 +69,7 @@ export async function createTask({ project_id, name, description, priority, mode
     mode,
     skip_plan_review: !!skip_plan_review,
     auto_publish: !!auto_publish,
+    depends_on: Array.isArray(depends_on) ? depends_on : [],
   });
 }
 

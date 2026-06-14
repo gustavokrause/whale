@@ -93,7 +93,9 @@ async function planReal(team, key, context) {
     `Plan STRICTLY from the CONTEXT below — only what it states or directly implies. Do NOT invent ` +
     `scope, do NOT assume facts not present, do NOT propose codebase audits. Augusto kills scope creep. ` +
     `If the context is too thin to justify any task, return []. ` +
-    `Each task: {name, description, priority(P0..P3), mode(dev|non-dev)}.`;
+    `Sequence work that builds on other tasks: set depends_on to the exact names of ` +
+    `the sibling tasks that must finish first ([] if independent). ` +
+    `Each task: {name, description, priority(P0..P3), mode(dev|non-dev), depends_on: string[]}.`;
   const user = `PROJECT: ${key}\n\nCONTEXT:\n${context}\n\nReturn a JSON array of proposed tasks (max 6, fewer is better).`;
   const out = await completeJSON({ system, user, model: config.models.plan });
   return Array.isArray(out) ? out : out.tasks || [];
@@ -111,6 +113,7 @@ function triageAndStore(team, db, key, t) {
     rationale: tri.rationale,
     bypass: tri.bypass,
     auto_publish: tri.auto_publish,
+    deps: Array.isArray(t.depends_on) ? t.depends_on : [],
   });
 }
 

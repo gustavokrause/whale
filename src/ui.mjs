@@ -63,7 +63,11 @@ export const PAGE = `<!doctype html><html lang="en"><head>
     <div id="ctxbody"></div>
   </section>
   <section id="proposed" style="display:none">
-    <p class="hint">The review gate. Each task shows its <b>risk</b> and whether it'll <b>bypass</b> your review (🟢) or wait for it (🔴/🟡). <b>Approve</b> → <b>Push to krill</b> (krill then runs it). Nothing reaches krill without passing here.</p>
+    <p class="hint">The review gate. Each task shows its <b>risk</b> and whether it'll <b>bypass</b> your review (🟢) or wait for it (🔴/🟡). <b>Approve</b> → <b>Push to krill</b>, or <b>Push batch</b> to send a whole project in dependency order. Nothing reaches krill without passing here.</p>
+    <div class="row">
+      <input id="batchk" placeholder="project key for batch push"/>
+      <button class="act" onclick="pushBatch()" title="Push all pushable tasks for this project to krill, in dependency order.">Push batch →</button>
+    </div>
     <div id="propbody"></div>
   </section>
 </main>
@@ -104,6 +108,9 @@ async function viewCtx(k){const {md}=await j('/api/context?key='+encodeURICompon
 async function plan(k){const r=await j('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
   alert('Proposed '+(r.proposed||[]).length+' task(s) for '+k+'.\\n\\nReview them in the Proposed tab.');}
 
+async function pushBatch(){const k=document.getElementById('batchk').value.trim(); if(!k)return;
+  const r=await j('/api/proposed/push-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+  alert(r.ok?('Pushed '+r.pushed+'/'+(r.total||r.pushed)+' to krill (dependency-ordered).'):('⚠ '+r.error)); loadProposed();}
 async function loadProposed(){const {proposed}=await j('/api/proposed');const el=document.getElementById('propbody');
   if(!proposed.length){el.innerHTML='<p class="empty">Nothing proposed yet. Distill, then Plan a project in the Context tab.</p>';return;}
   el.innerHTML='<ul>'+proposed.map(p=>'<li><b>'+esc(p.name)+'</b>'+(p.description?'<div class="meta">'+esc(p.description)+'</div>':'')+

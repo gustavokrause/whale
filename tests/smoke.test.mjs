@@ -43,8 +43,9 @@ test("db inbox + proposed round-trip", () => {
     markEntries(db, [e.id], "distilled");
     assert.equal(rawEntries(db).length, 0, "distilled entries leave the raw queue");
 
-    const t = addProposed(db, { project_key: "krill", name: "x", risk_tier: "low", bypass: 1 });
+    const t = addProposed(db, { project_key: "krill", name: "x", risk_tier: "low", bypass: 1, deps: ["y"] });
     assert.equal(listProposed(db, "proposed").length, 1);
+    assert.deepEqual(JSON.parse(t.deps), ["y"], "deps round-trip (B2)");
     updateProposed(db, t.id, { status: "approved" });
     assert.equal(listProposed(db, "approved").length, 1);
 
