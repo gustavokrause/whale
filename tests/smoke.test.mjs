@@ -14,9 +14,10 @@ import { config } from "../src/config.mjs";
 import { loadTeam } from "../src/persona-loader.mjs";
 import {
   openDb, addEntry, listEntries, rawEntries, markEntries, setEntryLane,
-  addProposed, listProposed, updateProposed,
+  addProposed, listProposed, updateProposed, getProposed,
 } from "../src/db.mjs";
 import { triage } from "../src/stages.mjs";
+import { push, pushBatch } from "../src/pipeline.mjs";
 
 test("persona-loader reads the ai-team source of truth", async () => {
   const team = await loadTeam(config.personasDir);
@@ -81,6 +82,23 @@ test("autonomy ladder: dial controls how far a task bypasses (B1)", () => {
   // aggressive: low + medium bypass
   assert.equal(bypass(low, "arqtrack", "aggressive"), true);
   assert.equal(bypass(med, "arqtrack", "aggressive"), true);
+});
+
+test("B4 arm-time confirm: auto-finish push/batch needs a distinct confirm", async () => {
+  const path = join(tmpdir(), `baleia-b4-${randomUUID()}.db`);
+  const db = openDb(path);
+  try {
+    const t = addProposed(db, { project_key: "arqtrack", name: "x", risk_tier: "low", auto_publish: true });
+    // no confirm → short-circuits with needsConfirm (before any krill call)
+    const r = await push(db, t.id);
+    assert.equal(r.needsConfirm, true, "single push needs confirm");
+    assert.equal(getProposed(db, t.id).status, "proposed", "not pushed yet");
+    const b = await pushBatch(null, db, "arqtrack");
+    assert.equal(b.needsConfirm, true, "batch needs confirm");
+  } finally {
+    db.close?.();
+    rmSync(path, { force: true });
+  }
 });
 
 test("auto-finish rung (A2): auto_publish only for aggressive + low + non-self-edit", () => {

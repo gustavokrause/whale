@@ -97,17 +97,30 @@ export async function routeEntry(team, db, entryId) {
  * order, wiring krill `depends_on` from the planner's sibling-name deps so "new
  * builds on finished". Topo-sorted; cycles fall back to insertion order.
  */
-export async function pushBatch(team, db, projectKey) {
+export async function pushBatch(team, db, projectKey, { confirm = false } = {}) {
   if ((projectKey || "").toLowerCase() === "global")
     return { ok: false, error: "'global' is not a project — reassign tasks first" };
-  if (!(await krill.ping())) return { ok: false, error: "krill unreachable" };
-  const projectId = await krill.resolveProjectId(projectKey);
-  if (!projectId) return { ok: false, error: `no krill project for "${projectKey}" (create it first)` };
 
   const items = listProposed(db).filter(
     (t) => t.project_key === projectKey && ["proposed", "approved", "push_failed"].includes(t.status)
   );
   if (!items.length) return { ok: true, pushed: 0, results: [] };
+
+  // B4 arm-time double-confirm: a batch that will auto-finish runs to DONE
+  // unattended — require a distinct second confirmation before arming.
+  const autoFin = items.filter((t) => t.auto_publish && t.risk_tier === "low");
+  if (autoFin.length && !confirm) {
+    return {
+      ok: false,
+      needsConfirm: true,
+      autoFinish: autoFin.length,
+      message: `${autoFin.length} of ${items.length} task(s) will run to DONE unattended (auto-merge, no review). Re-confirm to arm.`,
+    };
+  }
+
+  if (!(await krill.ping())) return { ok: false, error: "krill unreachable" };
+  const projectId = await krill.resolveProjectId(projectKey);
+  if (!projectId) return { ok: false, error: `no krill project for "${projectKey}" (create it first)` };
 
   const byName = new Map(items.map((t) => [t.name, t]));
   const ordered = topoByDeps(items, byName);
@@ -155,7 +168,8 @@ export async function approve(team, db, id) {
   let t = getProposed(db, id);
   if (!t) throw new Error("proposed task not found");
   t = updateProposed(db, id, { status: "approved" });
-  if (config.autonomy.autoPush) return push(db, id);
+  // autoPush is itself the deliberate arm, so it bypasses the per-push confirm.
+  if (config.autonomy.autoPush) return push(db, id, { confirm: true });
   return { task: t, pushed: false, note: "approved; auto-push off — push manually" };
 }
 
@@ -164,9 +178,13 @@ export function reject(db, id) {
 }
 
 /** Push an approved task to krill. High-risk tasks are never silently bypassed. */
-export async function push(db, id) {
+export async function push(db, id, { confirm = false } = {}) {
   const t = getProposed(db, id);
   if (!t) throw new Error("proposed task not found");
+  // B4: an auto-finishing task runs to DONE unattended — require a distinct confirm.
+  if (t.auto_publish && t.risk_tier === "low" && !confirm) {
+    return { task: t, pushed: false, needsConfirm: true, message: "This task auto-finishes (auto-merge to main, no review). Re-confirm to arm." };
+  }
   if (!(await krill.ping())) {
     const f = updateProposed(db, id, { status: "push_failed", push_error: "krill unreachable" });
     return { task: f, pushed: false, error: "krill unreachable" };

@@ -109,7 +109,9 @@ async function plan(k){const r=await j('/api/plan',{method:'POST',headers:{'Cont
   alert('Proposed '+(r.proposed||[]).length+' task(s) for '+k+'.\\n\\nReview them in the Proposed tab.');}
 
 async function pushBatch(){const k=document.getElementById('batchk').value.trim(); if(!k)return;
-  const r=await j('/api/proposed/push-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+  const post=(body)=>j('/api/proposed/push-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let r=await post({key:k});
+  if(r.needsConfirm){ if(!confirm('⚠ ARM AUTO-FINISH\\n\\n'+r.message)){loadProposed();return;} r=await post({key:k,confirm:true}); }
   alert(r.ok?('Pushed '+r.pushed+'/'+(r.total||r.pushed)+' to krill (dependency-ordered).'):('⚠ '+r.error)); loadProposed();}
 async function loadProposed(){const {proposed}=await j('/api/proposed');const el=document.getElementById('propbody');
   if(!proposed.length){el.innerHTML='<p class="empty">Nothing proposed yet. Distill, then Plan a project in the Context tab.</p>';return;}
@@ -126,7 +128,9 @@ async function loadProposed(){const {proposed}=await j('/api/proposed');const el
       '<button class="ghost" onclick="reassignTask(\\''+p.id+'\\')" title="Move to a different project and re-triage (re-runs risk + self-edit guard).">Reassign</button>'+
       '</div>':'')+
     '</li>').join('')+'</ul>';}
-async function pAct(id,a){const r=await j('/api/proposed/'+id+'/'+a,{method:'POST'});
+async function pAct(id,a){const post=(body)=>j('/api/proposed/'+id+'/'+a,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  let r=await post();
+  if(r.needsConfirm){ if(!confirm('⚠ ARM AUTO-FINISH\\n\\n'+r.message)){loadProposed();return;} r=await post({confirm:true}); }
   if(r.error)alert('⚠ '+r.error); else if(r.note)alert(r.note); else if(r.pushed)alert('Pushed to krill as '+(r.task&&r.task.krill_task_id||'?')); loadProposed();}
 async function reassignTask(id){const k=prompt('Reassign to which project? (e.g. baleia, krill, arqtrack, mv)'); if(!k)return;
   const r=await j('/api/proposed/'+id+'/reassign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_key:k.trim()})});

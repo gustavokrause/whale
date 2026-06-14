@@ -84,7 +84,7 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && url.pathname === "/api/proposed/push-batch") {
       const b = await readJson(req);
       if (!b.key) return send(res, 400, { error: "key required" });
-      return send(res, 200, await pushBatch(await getTeam(), db, b.key));
+      return send(res, 200, await pushBatch(await getTeam(), db, b.key, { confirm: !!b.confirm }));
     }
 
     // proposed
@@ -94,7 +94,10 @@ const server = createServer(async (req, res) => {
       const id = seg[2], action = seg[3];
       if (action === "approve") return send(res, 200, await approve(await getTeam(), db, id));
       if (action === "reject") return send(res, 200, { task: reject(db, id) });
-      if (action === "push") return send(res, 200, await push(db, id));
+      if (action === "push") {
+        const b = await readJson(req);
+        return send(res, 200, await push(db, id, { confirm: !!b.confirm }));
+      }
       if (action === "reassign") {
         const b = await readJson(req);
         if (!b.project_key) return send(res, 400, { error: "project_key required" });
