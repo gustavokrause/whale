@@ -82,6 +82,15 @@ test("autonomy ladder: dial controls how far a task bypasses (B1)", () => {
   assert.equal(bypass(med, "arqtrack", "aggressive"), true);
 });
 
+test("auto-finish rung (A2): auto_publish only for aggressive + low + non-self-edit", () => {
+  const team = { risk: { safeWords: [] } };
+  const ap = (name, key, dial) => triage(team, { name, description: "", project_key: key }, dial).auto_publish;
+  assert.equal(ap("fix typo", "arqtrack", "aggressive"), true, "aggressive low -> auto-finish");
+  assert.equal(ap("fix typo", "arqtrack", "balanced"), false, "balanced low -> no auto-finish");
+  assert.equal(ap("build a feature", "arqtrack", "aggressive"), false, "medium never auto-finishes");
+  assert.equal(ap("fix typo", "baleia", "aggressive"), false, "self-edit never auto-finishes");
+});
+
 test("self-edit guard: orchestrator tasks never bypass, any dial", () => {
   const team = { risk: { safeWords: [] } };
   // under aggressive a non-self-edit low WOULD bypass...

@@ -110,6 +110,7 @@ function triageAndStore(team, db, key, t) {
     risk_tier: tri.risk_tier,
     rationale: tri.rationale,
     bypass: tri.bypass,
+    auto_publish: tri.auto_publish,
   });
 }
 
@@ -146,15 +147,20 @@ export function triage(team, task, dial = config.autonomy.bypass) {
     else if (risk_tier === "medium") bypass = dial === "aggressive";
   }
 
+  // auto-finish rung (A2): aggressive + low + non-self-edit. krill only honors
+  // it when the project also sets allow_auto_finish (the project-side gate).
+  const auto_publish = !isSelfEdit && risk_tier === "low" && dial === "aggressive";
+
   const priority = risk_tier === "high" ? "P1" : risk_tier === "low" ? "P3" : "P2";
   const mode = DEV_RE.test(text) ? "dev" : "non-dev";
   const why = isSelfEdit ? "self-edit (orchestrator)" : hitsSafeWord ? "safe-word" : task.new_project ? "new-project" : HIGH_RE.test(text) ? "irreversible-keyword" : LOW_RE.test(text) ? "trivial" : "default";
   return {
     risk_tier,
     bypass,
+    auto_publish,
     priority,
     mode,
-    rationale: `${risk_tier} (${why}); dial=${dial} -> ${bypass ? "bypass plan review" : "human review"}`,
+    rationale: `${risk_tier} (${why}); dial=${dial} -> ${auto_publish ? "auto-finish" : bypass ? "bypass plan review" : "human review"}`,
   };
 }
 

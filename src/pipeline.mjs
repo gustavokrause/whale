@@ -108,6 +108,8 @@ export async function push(db, id) {
       mode: t.mode,
       // hard guard: only low/medium may bypass; high always gets human review
       skip_plan_review: t.bypass && t.risk_tier !== "high",
+      // auto-finish only for low risk (krill also requires project.allow_auto_finish)
+      auto_publish: !!t.auto_publish && t.risk_tier === "low",
     });
     const done = updateProposed(db, id, { status: "pushed", krill_task_id: created?.id || created?.task?.id || null });
     return { task: done, pushed: true, krill: created };
