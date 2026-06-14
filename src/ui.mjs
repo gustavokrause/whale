@@ -46,7 +46,7 @@ export const PAGE = `<!doctype html><html lang="en"><head>
   <section id="inbox">
     <p class="hint">Dump <b>anything</b> from any project — ⌘/Ctrl-Enter to send. A <i>project hint</i> is optional (baleia routes it if you skip it).
        <b>Distill all</b> folds raw notes into per-project Context. <b>route?</b> files one note into a lane (task / context / new&nbsp;project / ask).</p>
-    <textarea id="t" placeholder="A thought, a chat snippet, a request… krill, meu veleiro, saas factory, arqtrack, whatever." autofocus></textarea>
+    <textarea id="t" placeholder="A thought, a chat snippet, a request, whatever…" autofocus></textarea>
     <div class="row">
       <input id="hint" placeholder="project hint (optional)"/>
       <button class="act" onclick="dump()" title="Save this note. Instant, no AI.">Dump</button>
