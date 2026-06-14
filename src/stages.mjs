@@ -48,8 +48,11 @@ async function distillReal(team, key, prior, group) {
   const caio = persona(team, "Caio");
   const system =
     `${caio?.systemPrompt || ""}\n\nYou maintain a living CONTEXT.md for project "${key}". ` +
-    `Merge new notes into a structured doc with sections: Goals, Constraints, Decisions, Open questions. ` +
-    `Keep it tight; drop noise; preserve prior decisions.\n\n` +
+    `Merge new notes into a structured doc with sections: Goals, Work requested, Constraints, ` +
+    `Decisions, Open questions.\n` +
+    `Classify precisely: a concrete request ("remove X", "add Y", "fix Z") is **Work requested** ` +
+    `(an actionable item), NOT an Open question. Open questions are only genuine unknowns. Capture ` +
+    `the user's intent faithfully; don't invent scope. Keep it tight; preserve prior decisions.\n\n` +
     `OUTPUT CONTRACT: return ONLY the raw markdown of the file, starting with the line ` +
     `"# CONTEXT — ${key}". No preamble, no summary of what you changed, no code fences, no commentary.`;
   const user =
@@ -86,10 +89,13 @@ async function planReal(team, key, context) {
   const system =
     `You are a planning duo.\n\n# Augusto (Strategy)\n${augusto?.systemPrompt || ""}\n\n` +
     `# Maria (Product)\n${maria?.systemPrompt || ""}\n\n` +
-    `Augusto challenges scope and protects resources; Maria turns it into the smallest shippable tasks. ` +
-    `Propose only tasks the context justifies. Each: {name, description, priority(P0..P3), mode(dev|non-dev)}.`;
-  const user = `PROJECT: ${key}\n\nCONTEXT:\n${context}\n\nReturn a JSON array of proposed tasks (max 6).`;
-  const out = await completeJSON({ system, user, model: config.models.plan, maxTokens: 2000 });
+    `Augusto challenges scope and protects resources; Maria turns it into the smallest shippable tasks.\n` +
+    `Plan STRICTLY from the CONTEXT below — only what it states or directly implies. Do NOT invent ` +
+    `scope, do NOT assume facts not present, do NOT propose codebase audits. Augusto kills scope creep. ` +
+    `If the context is too thin to justify any task, return []. ` +
+    `Each task: {name, description, priority(P0..P3), mode(dev|non-dev)}.`;
+  const user = `PROJECT: ${key}\n\nCONTEXT:\n${context}\n\nReturn a JSON array of proposed tasks (max 6, fewer is better).`;
+  const out = await completeJSON({ system, user, model: config.models.plan });
   return Array.isArray(out) ? out : out.tasks || [];
 }
 
@@ -178,7 +184,7 @@ async function routeReal(team, entry, knownKeys = []) {
   const user =
     `KNOWN PROJECTS: ${knownKeys.length ? knownKeys.join(", ") : "(none yet)"}\n` +
     `INPUT: ${entry.text}\nPROJECT HINT: ${entry.project_hint || "(none)"}`;
-  return completeJSON({ system, user, model: config.models.route, maxTokens: 400 });
+  return completeJSON({ system, user, model: config.models.route });
 }
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "untitled";

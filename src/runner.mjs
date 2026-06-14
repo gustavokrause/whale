@@ -26,10 +26,12 @@ export function complete({ system, user, model }) {
         "--model", aliasFor(model),
         "--print",
         "--output-format", "text",
-        // pure text generation — block the file-writing/shell tools so the model
-        // returns its answer instead of writing files (it was creating a stray
-        // CONTEXT.md). Only valid tool names (the CLI rejects unknown ones).
-        "--disallowed-tools", "Write", "Edit", "Bash",
+        // pure text generation — block ALL side-effecting AND repo-reading tools.
+        // baleia's stages reason over the prompt only; without this the planner
+        // wandered the codebase (read PLAN.md, proposed repo tasks) instead of
+        // planning from CONTEXT, and wrote a stray CONTEXT.md. Valid names only
+        // (the CLI rejects unknown ones — "MultiEdit" did).
+        "--disallowed-tools", "Write", "Edit", "Bash", "Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task",
         "--dangerously-skip-permissions",
       ],
       { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }
