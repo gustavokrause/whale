@@ -31,6 +31,15 @@ export async function listProjects() {
   return Array.isArray(r) ? r : r?.projects || [];
 }
 
+/** Project metadata for onboarding (folder_path + has_repo), resolved by key. */
+export async function getProjectMeta(key) {
+  const want = keyToSlug(key);
+  const hit = (await listProjects()).find(
+    (p) => p.slug === want || keyToSlug(p.name) === want
+  );
+  return hit ? { folder_path: hit.folder_path, has_repo: hit.has_repo, name: hit.name } : null;
+}
+
 /** Normalized project keys from krill (so the router can pick real targets). */
 export async function projectKeys() {
   try {

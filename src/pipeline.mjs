@@ -1,10 +1,38 @@
 // baleia — orchestration + gates/dials. Ties the stages to krill, enforces the
 // human gates (new-project always gated; high-risk never auto-pushes).
 
+import { homedir } from "node:os";
 import { config } from "./config.mjs";
 import { getProposed, updateProposed, projectKeys, setEntryLane, rawEntries } from "./db.mjs";
 import { distill, plan, route, triage } from "./stages.mjs";
+import { auditComplete } from "./runner.mjs";
+import { writeContext } from "./context-store.mjs";
 import * as krill from "./krill-client.mjs";
+
+const expandHome = (p) => (p?.startsWith("~") ? p.replace(/^~/, homedir()) : p);
+
+/**
+ * Onboarding (B5): make baleia aware of a project. Code projects → read-only
+ * audit (cwd = the project's real folder) → CONTEXT. Idea projects (no repo /
+ * not in krill) → tell the user to seed. Awareness != autonomy: auditing
+ * baleia/krill is fine; the self-edit guard still gates their execution.
+ */
+export async function onboard(team, key) {
+  const meta = await krill.getProjectMeta(key);
+  if (!meta) return { ok: false, needsSeed: true, note: `"${key}" not found in krill — seed its CONTEXT by hand (idea project)` };
+  if (!meta.has_repo) return { ok: false, needsSeed: true, note: `"${key}" has no repo — seed its CONTEXT by hand` };
+
+  const caio = team.personas.find((p) => p.name === "Caio");
+  const system =
+    `${caio?.systemPrompt || ""}\n\nYou are onboarding the project "${key}". Read the codebase ` +
+    `(read-only) and produce its CONTEXT.md. Be concrete and accurate — this becomes baleia's memory ` +
+    `of the project.\nOUTPUT CONTRACT: return ONLY the markdown, starting with "# CONTEXT — ${key}". ` +
+    `Sections: Goals, Stack, Structure, Current state, Open questions. No preamble, no code fences.`;
+  const user = `Audit the repository in the working directory and output the full CONTEXT.md.`;
+  const md = await auditComplete({ system, user, model: config.models.plan, cwd: expandHome(meta.folder_path) });
+  writeContext(key, md);
+  return { ok: true, key, chars: md.length };
+}
 
 export async function distillAll(team, db) {
   await autoRouteUntagged(team, db); // give untagged entries a project before they pile into 'global'

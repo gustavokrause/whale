@@ -11,7 +11,7 @@ import { openDb, addEntry, listEntries } from "./db.mjs";
 import { listProposed } from "./db.mjs";
 import { loadTeam } from "./persona-loader.mjs";
 import { readContext, listContextKeys } from "./context-store.mjs";
-import { distillAll, planProject, approve, reject, push, routeEntry, reassign } from "./pipeline.mjs";
+import { distillAll, planProject, approve, reject, push, routeEntry, reassign, onboard } from "./pipeline.mjs";
 import { PAGE } from "./ui.mjs";
 
 const PORT = Number(process.env.BALEIA_PORT || 4100);
@@ -64,6 +64,13 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && url.pathname === "/api/context") {
       if (url.searchParams.get("key")) return send(res, 200, { key: url.searchParams.get("key"), md: readContext(url.searchParams.get("key")) });
       return send(res, 200, { keys: listContextKeys() });
+    }
+
+    // onboard (B5): audit a code project into CONTEXT, or flag seed-needed
+    if (method === "POST" && url.pathname === "/api/onboard") {
+      const b = await readJson(req);
+      if (!b.key) return send(res, 400, { error: "key required" });
+      return send(res, 200, await onboard(await getTeam(), b.key));
     }
 
     // plan

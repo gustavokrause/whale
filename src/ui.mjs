@@ -55,7 +55,11 @@ export const PAGE = `<!doctype html><html lang="en"><head>
     <ul id="ilist"><li class="empty">loading…</li></ul>
   </section>
   <section id="context" style="display:none">
-    <p class="hint">baleia's living memory — one <b>CONTEXT.md</b> per project, built from your dumps. Pick a project to read it, then <b>Plan this</b> to have the team propose tasks from it.</p>
+    <p class="hint">baleia's living memory — one <b>CONTEXT.md</b> per project, built from your dumps. Pick a project to read it, then <b>Plan this</b> to have the team propose tasks from it. <b>Onboard</b> audits a code project (read-only) into CONTEXT so baleia knows it.</p>
+    <div class="row">
+      <input id="obk" placeholder="project key to onboard (e.g. arqtrack, baleia)"/>
+      <button class="ghost" onclick="onboard()" title="Audit a code project (read-only) into CONTEXT, or flag seed-needed for idea projects.">Onboard →</button>
+    </div>
     <div id="ctxbody"></div>
   </section>
   <section id="proposed" style="display:none">
@@ -88,6 +92,9 @@ async function distill(){const r=await j('/api/distill',{method:'POST'});
 async function route(id){const r=await j('/api/route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   alert('Filed as: '+r.lane+(r.projectKey?' ['+r.projectKey+']':'')+(r.question?'\\n'+r.question:'')+(r.gated?'\\n('+r.note+')':'')+'\\n\\nwhy: '+(r.reason||'')); loadInbox();}
 
+async function onboard(){const k=document.getElementById('obk').value.trim(); if(!k)return;
+  const r=await j('/api/onboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+  alert(r.ok?('Onboarded '+r.key+' → CONTEXT ('+r.chars+' chars). Open it below.'):('⚠ '+(r.note||r.error))); document.getElementById('obk').value=''; loadContext();}
 async function loadContext(){const {keys}=await j('/api/context');const el=document.getElementById('ctxbody');
   if(!keys.length){el.innerHTML='<p class="empty">No context yet. Dump things in Inbox, then hit <b>Distill all</b>.</p>';return;}
   el.innerHTML='<h3>projects</h3>'+keys.map(k=>'<button class="ghost" onclick="viewCtx(\\''+k+'\\')">'+esc(k)+'</button> ').join('')+'<div id="ctxview"></div>';}
