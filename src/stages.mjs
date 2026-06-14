@@ -202,3 +202,35 @@ async function routeReal(team, entry, knownKeys = []) {
 }
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "untitled";
+
+/* ---------- REFINE: Input is a turn — re-evaluate a task per user input (B3) ---------- */
+
+export async function refineProposal(team, current, input) {
+  if (!isReal()) {
+    // stub: fold the input into the description, keep the rest
+    return {
+      name: current.name,
+      description: `${current.description || ""} | refine: ${input}`.trim(),
+      priority: current.priority,
+      mode: current.mode,
+      depends_on: JSON.parse(current.deps || "[]"),
+    };
+  }
+  const maria = persona(team, "Maria");
+  const system =
+    `${maria?.systemPrompt || ""}\n\nRefine ONE proposed task per the user's input. Keep what's ` +
+    `good, apply the change, don't invent extra scope. Return ` +
+    `{name, description, priority(P0..P3), mode(dev|non-dev), depends_on:string[]}.`;
+  const user =
+    `CURRENT TASK:\n${JSON.stringify({ name: current.name, description: current.description, priority: current.priority, mode: current.mode })}\n\n` +
+    `USER INPUT:\n${input}\n\nReturn the updated task JSON.`;
+  return completeJSON({ system, user, model: config.models.plan });
+}
+
+/** Human-readable preview of where a task will stop in krill, from its flags. */
+export function flowPreview(t) {
+  if (t.risk_tier === "high") return "🔴 full review (plan + deliverable)";
+  if (t.auto_publish) return "🟢 auto-finish → DONE (no gate)";
+  if (t.bypass) return "🟡 skips plan review → stops at deliverable";
+  return "stops at plan review";
+}

@@ -45,6 +45,7 @@ export function openDb(dbPath) {
   // idempotent migrations for pre-existing databases
   try { db.exec(`ALTER TABLE proposed_tasks ADD COLUMN auto_publish INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE proposed_tasks ADD COLUMN deps TEXT NOT NULL DEFAULT '[]'`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE proposed_tasks ADD COLUMN refine_log TEXT NOT NULL DEFAULT '[]'`); } catch { /* exists */ }
   return db;
 }
 

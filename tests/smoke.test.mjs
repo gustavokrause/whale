@@ -16,8 +16,8 @@ import {
   openDb, addEntry, listEntries, rawEntries, markEntries, setEntryLane,
   addProposed, listProposed, updateProposed, getProposed,
 } from "../src/db.mjs";
-import { triage } from "../src/stages.mjs";
-import { push, pushBatch } from "../src/pipeline.mjs";
+import { triage, flowPreview } from "../src/stages.mjs";
+import { push, pushBatch, refine } from "../src/pipeline.mjs";
 
 test("persona-loader reads the ai-team source of truth", async () => {
   const team = await loadTeam(config.personasDir);
@@ -82,6 +82,30 @@ test("autonomy ladder: dial controls how far a task bypasses (B1)", () => {
   // aggressive: low + medium bypass
   assert.equal(bypass(low, "arqtrack", "aggressive"), true);
   assert.equal(bypass(med, "arqtrack", "aggressive"), true);
+});
+
+test("flow preview reflects the gates a task will hit (B3)", () => {
+  assert.match(flowPreview({ risk_tier: "high" }), /full review/);
+  assert.match(flowPreview({ risk_tier: "low", auto_publish: true }), /auto-finish/);
+  assert.match(flowPreview({ risk_tier: "low", bypass: true }), /deliverable/);
+  assert.equal(flowPreview({ risk_tier: "low" }), "stops at plan review");
+});
+
+test("B3 refine: Input re-evaluates + re-triages + logs the turn", async () => {
+  const path = join(tmpdir(), `baleia-b3-${randomUUID()}.db`);
+  const db = openDb(path);
+  const team = { risk: { safeWords: [] } };
+  try {
+    const t = addProposed(db, { project_key: "arqtrack", name: "add export", description: "csv", risk_tier: "medium" });
+    const r = await refine(team, db, t.id, "also support json");
+    assert.match(r.task.description, /json/, "stub folds the input in");
+    assert.equal(JSON.parse(r.task.refine_log).length, 1, "turn logged");
+    assert.equal(r.task.status, "proposed", "re-opened for next decision");
+    assert.ok(typeof r.flow === "string" && r.flow.length, "flow preview returned");
+  } finally {
+    db.close?.();
+    rmSync(path, { force: true });
+  }
 });
 
 test("B4 arm-time confirm: auto-finish push/batch needs a distinct confirm", async () => {

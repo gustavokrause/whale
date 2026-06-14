@@ -4,7 +4,7 @@
 import { homedir } from "node:os";
 import { config } from "./config.mjs";
 import { getProposed, updateProposed, projectKeys, setEntryLane, rawEntries, listProposed } from "./db.mjs";
-import { distill, plan, route, triage } from "./stages.mjs";
+import { distill, plan, route, triage, refineProposal, flowPreview } from "./stages.mjs";
 import { auditComplete } from "./runner.mjs";
 import { writeContext } from "./context-store.mjs";
 import * as krill from "./krill-client.mjs";
@@ -176,6 +176,37 @@ export async function approve(team, db, id) {
 export function reject(db, id) {
   return updateProposed(db, id, { status: "rejected" });
 }
+
+/**
+ * Refine a proposed task from user Input (B3). Input is a turn: re-evaluate the
+ * task with the input, re-triage (flags may change), append to the refine log,
+ * and re-open it as 'proposed'. Returns the updated task + flow preview so the
+ * UI can show the next Approve/Decline/Input.
+ */
+export async function refine(team, db, id, input) {
+  const t = getProposed(db, id);
+  if (!t) throw new Error("proposed task not found");
+  const r = await refineProposal(team, t, input);
+  const tri = triage(team, { name: r.name, description: r.description, project_key: t.project_key });
+  const log = JSON.parse(t.refine_log || "[]");
+  log.push({ input, at: Date.now() });
+  const updated = updateProposed(db, id, {
+    name: r.name,
+    description: r.description || "",
+    priority: r.priority || tri.priority,
+    mode: r.mode || tri.mode,
+    risk_tier: tri.risk_tier,
+    bypass: tri.bypass ? 1 : 0,
+    auto_publish: tri.auto_publish ? 1 : 0,
+    deps: JSON.stringify(Array.isArray(r.depends_on) ? r.depends_on : JSON.parse(t.deps || "[]")),
+    rationale: tri.rationale,
+    refine_log: JSON.stringify(log),
+    status: "proposed",
+  });
+  return { task: updated, flow: flowPreview(updated) };
+}
+
+export const previewFlow = flowPreview;
 
 /** Push an approved task to krill. High-risk tasks are never silently bypassed. */
 export async function push(db, id, { confirm = false } = {}) {

@@ -11,7 +11,7 @@ import { openDb, addEntry, listEntries } from "./db.mjs";
 import { listProposed } from "./db.mjs";
 import { loadTeam } from "./persona-loader.mjs";
 import { readContext, listContextKeys } from "./context-store.mjs";
-import { distillAll, planProject, approve, reject, push, routeEntry, reassign, onboard, pushBatch } from "./pipeline.mjs";
+import { distillAll, planProject, approve, reject, push, routeEntry, reassign, onboard, pushBatch, refine } from "./pipeline.mjs";
 import { PAGE } from "./ui.mjs";
 
 const PORT = Number(process.env.BALEIA_PORT || 4100);
@@ -102,6 +102,11 @@ const server = createServer(async (req, res) => {
         const b = await readJson(req);
         if (!b.project_key) return send(res, 400, { error: "project_key required" });
         return send(res, 200, { task: reassign(await getTeam(), db, id, b.project_key) });
+      }
+      if (action === "refine") {
+        const b = await readJson(req);
+        if (!b.input) return send(res, 400, { error: "input required" });
+        return send(res, 200, await refine(await getTeam(), db, id, b.input));
       }
     }
 

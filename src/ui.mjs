@@ -119,15 +119,22 @@ async function loadProposed(){const {proposed}=await j('/api/proposed');const el
     '<div class="meta"><span class="pill '+(p.risk_tier||'')+'">'+(p.risk_tier||'?')+' risk</span>'+
     '<span class="pill">'+p.priority+'</span><span class="pill">'+p.mode+'</span>'+
     (p.bypass?'<span class="pill by">bypass review</span>':'<span class="pill">needs your review</span>')+
-    '<span class="pill">'+p.status+'</span><span class="pill">'+esc(p.project_key)+'</span></div>'+
-    '<div class="meta">'+esc(p.rationale||'')+(p.push_error?' · ⚠ '+esc(p.push_error):'')+'</div>'+
+    '<span class="pill">'+p.status+'</span><span class="pill">'+esc(p.project_key)+'</span>'+
+    '<span class="pill by">flow: '+flowOf(p)+'</span></div>'+
+    '<div class="meta">'+esc(p.rationale||'')+(p.push_error?' · ⚠ '+esc(p.push_error):'')+
+      (JSON.parse(p.refine_log||'[]').length?' · ✎ refined '+JSON.parse(p.refine_log).length+'×':'')+'</div>'+
     (p.status!=='pushed'?'<div class="row" style="margin-top:8px">'+
       (p.status==='proposed'?'<button class="act" onclick="pAct(\\''+p.id+'\\',\\'approve\\')" title="Accept this task. With autoPush off it stages for a manual push.">Approve</button>'+
         '<button class="ghost danger" onclick="pAct(\\''+p.id+'\\',\\'reject\\')" title="Discard this proposal.">Reject</button>':'')+
       (p.status==='approved'?'<button class="act" onclick="pAct(\\''+p.id+'\\',\\'push\\')" title="Send to krill as a BACKLOG task (carries the bypass flag).">Push to krill</button>':'')+
+      '<button class="ghost" onclick="refineTask(\\''+p.id+'\\')" title="Give input — baleia re-evaluates the task. Repeat until you Approve/Decline.">Input</button>'+
       '<button class="ghost" onclick="reassignTask(\\''+p.id+'\\')" title="Move to a different project and re-triage (re-runs risk + self-edit guard).">Reassign</button>'+
       '</div>':'')+
     '</li>').join('')+'</ul>';}
+function flowOf(p){ if(p.risk_tier==='high')return '🔴 full review'; if(p.auto_publish)return '🟢 auto-finish→DONE'; if(p.bypass)return '🟡 →deliverable'; return 'plan review'; }
+async function refineTask(id){const input=prompt('Input — what should change about this task?'); if(!input)return;
+  const r=await j('/api/proposed/'+id+'/refine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input})});
+  if(r.error){alert('⚠ '+r.error);} else {alert('Refined → '+r.task.name+'\\nflow: '+r.flow);} loadProposed();}
 async function pAct(id,a){const post=(body)=>j('/api/proposed/'+id+'/'+a,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
   let r=await post();
   if(r.needsConfirm){ if(!confirm('⚠ ARM AUTO-FINISH\\n\\n'+r.message)){loadProposed();return;} r=await post({confirm:true}); }
