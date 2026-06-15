@@ -75,6 +75,13 @@ export const deleteEntry = (id: string) => {
   return r;
 };
 
+/** Reassign a request to a project (promote an unassigned/global dump). */
+export function setEntryProject(id: string, projectHint: string | null): InboxEntry | undefined {
+  db.update(inboxEntries).set({ project_hint: projectHint }).where(eq(inboxEntries.id, id)).run();
+  broadcast();
+  return getEntry(id);
+}
+
 /** distinct project keys seen in the inbox (null hint => 'global') */
 export const projectKeys = (): string[] => {
   const rows = db.select({ h: inboxEntries.project_hint }).from(inboxEntries).all();

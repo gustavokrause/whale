@@ -200,8 +200,8 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
   }, [load, active, rev]);
 
   const dump = async () => {
-    if (!text.trim() || !project) return;
-    await withBusy("Saving request", post("/api/inbox", { text: text.trim(), project_hint: project }));
+    if (!text.trim()) return;
+    await withBusy("Capturing", post("/api/inbox", { text: text.trim(), project_hint: project || null }));
     setText("");
     load();
     onChange();
@@ -210,6 +210,23 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
     if (!key) return;
     const r = await withBusy(`Planning ${key} (real Claude)`, post("/api/plan", { key }));
     push({ variant: "success", title: `Proposed ${(r.proposed || []).length} task(s) for ${key}`, description: "Review in the Proposed tab" });
+    load();
+    onChange();
+  };
+  const moveEntry = async (id: string) => {
+    const k = prompt(`Move to which onboarded project?\n${projects.join(", ")}`);
+    if (!k) return;
+    await withBusy("Moving", j(`/api/inbox/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_hint: k.trim() }) }));
+    load();
+    onChange();
+  };
+  const makeProject = async (id: string, body: string) => {
+    const k = prompt("New project key for this idea:");
+    if (!k) return;
+    const key = k.trim();
+    await withBusy(`Creating ${key}`, post("/api/context", { key, md: `# CONTEXT — ${key}\n\n## Idea\n${body}\n` }));
+    await j(`/api/inbox/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_hint: key }) });
+    push({ variant: "success", title: `Created ${key}`, description: "seeded + request moved — Plan it" });
     load();
     onChange();
   };
@@ -232,9 +249,9 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
   return (
     <section>
       <p className={hint}>
-        Dump <b>work requests</b> for a project (⌘/Ctrl-Enter) — each is queued as <i>pending</i>. Then
-        <b> Plan</b> (below) turns <b>all</b> of a project&apos;s pending requests into proposed tasks, grounded
-        by its Context. Onboard a project in the <b>Context</b> tab first.
+        Dump <b>work requests</b> for a project — or leave it <b>unassigned</b> to just capture an idea
+        (⌘/Ctrl-Enter). Each is queued <i>pending</i>. <b>Plan</b> (per group) turns a project&apos;s pending
+        requests into proposed tasks; <b>unassigned</b> ones you <b>Move</b> to a project or <b>Make</b> a new one.
       </p>
       <textarea
         value={text}
@@ -250,52 +267,63 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
           onChange={(e) => setProject(e.target.value)}
           className="px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono min-w-[160px]"
         >
-          {projects.length === 0 && <option value="">(no projects — onboard one)</option>}
+          <option value="">— unassigned (capture) —</option>
           {projects.map((p) => (
             <option key={p} value={p}>{p}</option>
           ))}
         </select>
-        <button className={`${actBtn} ${dis}`} onClick={dump} disabled={!project}>
-          Dump request
+        <button className={`${actBtn} ${dis}`} onClick={dump} disabled={!text.trim()}>
+          {project ? "Dump request" : "Capture"}
         </button>
       </div>
       {entries.length === 0 ? (
         <p className="text-text-2 mt-4">No requests yet — dump one above.</p>
       ) : (
-        groupKeys.map((p) => (
-          <div key={p} className="mt-4 border border-border rounded-lg overflow-hidden">
-            {/* per-project group: requests + its own Plan (acts on this project's pending) */}
-            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-surface-2 border-b border-border">
-              <span className="text-sm">
-                <b>{p}</b> <span className="text-text-2">· {pendingIn(grouped[p])} pending</span>
-              </span>
-              <button
-                className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
-                onClick={() => planProject(p)}
-                disabled={pendingIn(grouped[p]) === 0}
-                title={`Plan all pending requests for ${p}`}
-              >
-                Plan <ArrowRight className="h-3.5 w-3.5" />
-              </button>
+        groupKeys.map((p) => {
+          const un = p === "(unassigned)";
+          return (
+            <div key={p} className="mt-4 border border-border rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-surface-2 border-b border-border">
+                <span className="text-sm">
+                  <b>{un ? "unassigned" : p}</b>{" "}
+                  <span className="text-text-2">· {un ? "scratchpad — promote items to a project" : `${pendingIn(grouped[p])} pending`}</span>
+                </span>
+                {!un && (
+                  <button
+                    className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
+                    onClick={() => planProject(p)}
+                    disabled={pendingIn(grouped[p]) === 0}
+                    title={`Plan all pending requests for ${p}`}
+                  >
+                    Plan <ArrowRight className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <ul className="divide-y divide-border">
+                {grouped[p].map((e) => (
+                  <li key={e.id} className="px-3 py-2.5">
+                    {e.text}
+                    <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
+                      <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
+                        {e.status === "raw" ? "pending" : e.status}
+                      </span>
+                      <span>{new Date(e.created_at).toLocaleString()}</span>
+                      {un && (
+                        <>
+                          <button className={`${ghost} !px-2 !py-1`} onClick={() => moveEntry(e.id)} title="Move to an onboarded project">Move to…</button>
+                          <button className={`${ghost} !px-2 !py-1`} onClick={() => makeProject(e.id, e.text)} title="Seed a new project from this idea">Make project</button>
+                        </>
+                      )}
+                      <button className={`${danger} inline-flex items-center !px-2 !py-1`} title="Delete request" onClick={() => del(e.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <ul className="divide-y divide-border">
-              {grouped[p].map((e) => (
-                <li key={e.id} className="px-3 py-2.5">
-                  {e.text}
-                  <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
-                    <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
-                      {e.status === "raw" ? "pending" : e.status}
-                    </span>
-                    <span>{new Date(e.created_at).toLocaleString()}</span>
-                    <button className={`${danger} inline-flex items-center !px-2 !py-1`} title="Delete request" onClick={() => del(e.id)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))
+          );
+        })
       )}
     </section>
   );
