@@ -780,6 +780,70 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   );
 }
 
+/* ---------- Settings: copy + the dial→outcome model ---------- */
+
+const DIALS = [
+  { id: "conservative", label: "Conservative", blurb: "Nothing skips you. Every proposed task waits for your plan review before krill builds it." },
+  { id: "balanced", label: "Balanced", blurb: "Trivial work flows on its own; anything with real risk still waits for your review." },
+  { id: "aggressive", label: "Aggressive", blurb: "Trivial work runs all the way to merged, unattended. Medium risk skips plan review. High risk still waits." },
+] as const;
+
+type Outcome = "review" | "bypass" | "auto";
+const OUTCOME: Record<Outcome, { dot: string; label: string; note: string; cls: string }> = {
+  review: { dot: "🔴", label: "Human review", note: "Holds in Proposed until you approve the plan", cls: "text-info border-info/40 bg-info/10" },
+  bypass: { dot: "🟡", label: "Skip plan review", note: "Auto-plans & builds; you review the finished deliverable", cls: "text-warning border-warning/40 bg-warning/10" },
+  auto: { dot: "🟢", label: "Auto-finish", note: "Runs to DONE and merges to main — no review at all", cls: "text-success border-success/40 bg-success/10" },
+};
+
+const TIERS = [
+  { id: "low", label: "Low", eg: "typo · rename · docs · comment · lint · copy" },
+  { id: "medium", label: "Medium", eg: "most feature work — the default tier" },
+  { id: "high", label: "High", eg: "delete · migration · schema · deploy · auth · payment · security — plus safe-words, new projects, and anything targeting whale/krill" },
+] as const;
+
+// Mirrors triage() in stages.ts: high (and self-edit) always review; the dial only
+// moves low/medium.
+function outcomeFor(dial: string, tier: string): Outcome {
+  if (tier === "high") return "review";
+  if (tier === "low") return dial === "aggressive" ? "auto" : dial === "balanced" ? "bypass" : "review";
+  return dial === "aggressive" ? "bypass" : "review"; // medium
+}
+
+function SettingCard({ title, kicker, children }: { title: string; kicker?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border bg-surface-2/60 p-4">
+      <div className="mb-3">
+        <h4 className="text-sm font-semibold text-text">{title}</h4>
+        {kicker ? <p className="text-xs text-text-2 leading-relaxed mt-1">{kicker}</p> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ToggleRow({ on, onChange, title, desc, tone = "primary" }: {
+  on: boolean; onChange: (v: boolean) => void; title: string; desc: React.ReactNode; tone?: "primary" | "warning";
+}) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer select-none">
+      <span className={`mt-0.5 relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${on ? (tone === "warning" ? "bg-warning" : "bg-primary") : "bg-border-strong"}`}>
+        <input type="checkbox" className="sr-only" checked={on} onChange={(e) => onChange(e.target.checked)} />
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
+      </span>
+      <span className="min-w-0">
+        <span className="text-sm text-text">{title}</span>
+        <span className="block text-xs text-text-2 leading-relaxed mt-0.5">{desc}</span>
+      </span>
+    </label>
+  );
+}
+
+const MODEL_NOTE: Record<string, string> = {
+  haiku: "fastest · cheapest",
+  sonnet: "balanced",
+  opus: "deepest · slowest · priciest",
+};
+
 function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () => void; rev: number }) {
   const [c, setC] = useState<ConfigSnap | null>(null);
   const { push } = useToast();
@@ -806,48 +870,151 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
   };
 
   const M = ["haiku", "sonnet", "opus"];
+  const activeDial = DIALS.find((d) => d.id === c.autonomy.bypass) ?? DIALS[0];
 
   return (
-    <section>
+    <section className="space-y-4">
       <p className={hint}>
-        Runtime dials — saved to whale&apos;s DB, applied <b>live</b> (no restart). The <b>self-edit guard</b> is
-        env-only and read-only here: a no-auth LAN UI must not weaken it.
+        How much whale does on its own. Changes save to whale&apos;s DB and apply <b>live</b> — no restart.
       </p>
-      <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">runner</h3>
-      <NativeSelect value={c.runner} onChange={(e) => save({ runner: e.target.value })}>
-        {["stub", "real"].map((o) => <option key={o}>{o}</option>)}
-      </NativeSelect>
-      <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">models</h3>
-      <div className="flex gap-2 flex-wrap items-center">
-        {(["plan", "route"] as const).map((m) => (
-          <label key={m} className="flex items-center gap-1.5">
-            {m}
-            <NativeSelect value={c.models[m]} onChange={(e) => save({ [`model_${m}`]: e.target.value })}>
-              {M.map((o) => <option key={o}>{o}</option>)}
+
+      {/* ---- The autonomy dial: the one setting that decides how much runs without you ---- */}
+      <SettingCard
+        title="Autonomy dial"
+        kicker="How far a proposed task travels before it needs you. whale scores each task's risk, then this dial decides what that risk is allowed to skip."
+      >
+        <div className="inline-flex rounded-lg border border-border-strong overflow-hidden font-mono text-sm">
+          {DIALS.map((d) => {
+            const on = c.autonomy.bypass === d.id;
+            return (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => save({ bypass: d.id })}
+                className={`px-3.5 py-2 transition-colors ${on ? "bg-primary text-white" : "bg-surface text-text-2 hover:text-text"} ${d.id !== "conservative" ? "border-l border-border-strong" : ""}`}
+              >
+                {d.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-text-2 leading-relaxed mt-2.5">{activeDial.blurb}</p>
+
+        {/* outcome matrix: risk tier × dial → what happens */}
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr>
+                <th className="text-left font-medium text-text-3 p-2 w-[34%]">If a task is…</th>
+                {DIALS.map((d) => (
+                  <th key={d.id} className={`p-2 text-left font-medium ${c.autonomy.bypass === d.id ? "text-primary" : "text-text-3"}`}>
+                    {d.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {TIERS.map((t) => (
+                <tr key={t.id} className="border-t border-border align-top">
+                  <td className="p-2">
+                    <div className="text-text font-medium">{t.label} risk</div>
+                    <div className="text-text-3 text-[11px] leading-snug mt-0.5">{t.eg}</div>
+                  </td>
+                  {DIALS.map((d) => {
+                    const o = OUTCOME[outcomeFor(d.id, t.id)];
+                    const active = c.autonomy.bypass === d.id;
+                    return (
+                      <td key={d.id} className="p-1.5">
+                        <div className={`rounded-md border px-2 py-1.5 transition-opacity ${o.cls} ${active ? "ring-1 ring-current" : "opacity-40"}`}>
+                          <span className="font-medium whitespace-nowrap">{o.dot} {o.label}</span>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* legend */}
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {(Object.keys(OUTCOME) as Outcome[]).map((k) => (
+            <div key={k} className="flex items-start gap-1.5 text-[11px] text-text-2 leading-snug">
+              <span>{OUTCOME[k].dot}</span>
+              <span><b className="text-text">{OUTCOME[k].label}</b> — {OUTCOME[k].note}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-text-3 mt-3 border-t border-border pt-2.5">
+          <b className="text-text-2">High risk and anything targeting whale/krill always wait for you</b> — the dial can never auto-merge those. That&apos;s the self-edit guard below.
+        </p>
+      </SettingCard>
+
+      {/* ---- Push + new-project gates ---- */}
+      <SettingCard title="Gates">
+        <div className="space-y-4">
+          <ToggleRow
+            on={c.autonomy.autoPush}
+            onChange={(v) => save({ auto_push: v })}
+            title="Auto-push approved tasks"
+            desc="On: approving a proposed task sends it to krill immediately. Off: approve, then push by hand — a second checkpoint before work leaves whale."
+          />
+          <ToggleRow
+            on={c.autonomy.allowNewProjects}
+            onChange={(v) => save({ allow_new_projects: v })}
+            title="Allow proposing new projects"
+            desc="On: the router may route an idea to a brand-new project. Even then it's held for you — a new project is always high-risk and never auto-created."
+          />
+        </div>
+      </SettingCard>
+
+      {/* ---- Engine: runner + models ---- */}
+      <SettingCard
+        title="Engine"
+        kicker="What runs the thinking. Stub fakes outputs for wiring/tests; Real spawns the Claude Code CLI."
+      >
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs text-text-2">Runner</span>
+            <NativeSelect value={c.runner} onChange={(e) => save({ runner: e.target.value })}>
+              {["stub", "real"].map((o) => <option key={o}>{o}</option>)}
             </NativeSelect>
           </label>
-        ))}
-      </div>
-      <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">autonomy</h3>
-      <label className="flex items-center gap-1.5">
-        bypass
-        <NativeSelect value={c.autonomy.bypass} onChange={(e) => save({ bypass: e.target.value })}>
-          {["conservative", "balanced", "aggressive"].map((o) => <option key={o}>{o}</option>)}
-        </NativeSelect>
-      </label>
-      <label className="flex items-center gap-2 mt-3">
-        <input type="checkbox" checked={c.autonomy.autoPush} onChange={(e) => save({ auto_push: e.target.checked })} />
-        auto-push approved tasks
-      </label>
-      <label className="flex items-center gap-2 mt-2">
-        <input type="checkbox" checked={c.autonomy.allowNewProjects} onChange={(e) => save({ allow_new_projects: e.target.checked })} />
-        allow proposing new projects
-      </label>
-      <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">env-locked (read-only)</h3>
-      <div className="text-xs text-text-2 flex gap-2 flex-wrap">
-        <span className="px-2 py-1 rounded-full bg-danger/15 text-danger">self-edit guard: {c.envLocked.protected.join(", ")}</span>
-        <span className="px-2 py-1 rounded-full bg-border">krill: {c.envLocked.krillUrl}</span>
-      </div>
+          {([
+            { m: "plan" as const, role: "Plan", desc: "decomposes requests → tasks (Augusto + Maria)" },
+            { m: "route" as const, role: "Route", desc: "classifies an inbox entry → its destination" },
+          ]).map(({ m, role, desc }) => (
+            <label key={m} className="flex flex-col gap-1.5">
+              <span className="text-xs text-text-2">{role} model <span className="text-text-3">· {desc}</span></span>
+              <div className="flex items-center gap-2">
+                <NativeSelect value={c.models[m]} onChange={(e) => save({ [`model_${m}`]: e.target.value })}>
+                  {M.map((o) => <option key={o}>{o}</option>)}
+                </NativeSelect>
+                <span className="text-[11px] text-text-3 font-mono">{MODEL_NOTE[c.models[m]]}</span>
+              </div>
+            </label>
+          ))}
+        </div>
+      </SettingCard>
+
+      {/* ---- Env-locked safety floor ---- */}
+      <SettingCard
+        title="Safety floor"
+        kicker="Set by environment, not editable here — a no-auth LAN UI must not be able to weaken its own brakes."
+      >
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-danger/15 text-danger font-mono">
+            🔒 self-edit guard: {c.envLocked.protected.join(", ")}
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-border text-text-2 font-mono">
+            krill: {c.envLocked.krillUrl}
+          </span>
+        </div>
+        <p className="text-[11px] text-text-3 leading-relaxed mt-2.5">
+          Tasks targeting these projects are forced to human review and can never bypass — that&apos;s how whale edits itself without a runaway loop.
+        </p>
+      </SettingCard>
     </section>
   );
 }
