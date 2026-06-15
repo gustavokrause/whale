@@ -11,7 +11,8 @@ import {
 import path from "node:path";
 
 const DIR =
-  process.env.WHALE_CONTEXT_DIR || path.resolve(process.cwd(), "data/context");
+  process.env.WHALE_CONTEXT_DIR ||
+  path.resolve(/*turbopackIgnore: true*/ process.cwd(), "data/context");
 
 export const keyToSlug = (key: string | null | undefined): string =>
   (key || "global")

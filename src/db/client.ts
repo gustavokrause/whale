@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import * as schema from "./schema";
 
-const dbPath = resolve(process.cwd(), process.env.DB_PATH ?? "data/whale.db");
+const dbPath = resolve(/*turbopackIgnore: true*/ process.cwd(), process.env.DB_PATH ?? "data/whale.db");
 mkdirSync(dirname(dbPath), { recursive: true });
 
 const sqlite = new Database(dbPath);
