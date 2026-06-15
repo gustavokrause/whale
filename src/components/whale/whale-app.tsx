@@ -452,11 +452,14 @@ type EnrichedTask = ProposedTask & { krill_status?: string | null };
 function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number }) {
   const [items, setItems] = useState<EnrichedTask[]>([]);
   const [showRej, setShowRej] = useState(false);
-  const [batchKey, setBatchKey] = useState("");
+  const [projects, setProjects] = useState<string[]>([]);
   const { push } = useToast();
 
   // ?sync=1 reads back live krill status for pushed tasks (Gap A — no more stale rows)
-  const load = useCallback(async () => setItems((await j("/api/proposed?sync=1")).proposed), []);
+  const load = useCallback(async () => {
+    setItems((await j("/api/proposed?sync=1")).proposed);
+    setProjects((await j("/api/context")).keys || []);
+  }, []);
   useEffect(() => {
     load();
     const id = setInterval(() => active && !document.hidden && load(), 5000);
@@ -483,7 +486,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
     load();
   };
   const reassign = async (id: string) => {
-    const k = prompt("Reassign to which project? (e.g. whale, krill, arqtrack)");
+    const k = prompt(`Reassign to which project?\n${projects.join(", ")}`);
     if (!k) return;
     const r = await withBusy("Reassigning + re-triaging", post(`/api/proposed/${id}/reassign`, { project_key: k.trim() }));
     if (r.error) push({ variant: "danger", title: "Reassign failed", description: r.error });
@@ -495,40 +498,38 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
     load();
     onChange();
   };
-  const pushBatch = async () => {
-    if (!batchKey.trim()) return;
-    let r = await withBusy("Pushing batch to krill", post("/api/proposed/push-batch", { key: batchKey.trim() }));
+  const pushBatch = async (key: string) => {
+    let r = await withBusy(`Pushing ${key} to krill`, post("/api/proposed/push-batch", { key }));
     if (r.needsConfirm) {
       if (!confirm(`⚠ ARM AUTO-FINISH\n\n${r.message}`)) return load();
-      r = await withBusy("Pushing batch to krill", post("/api/proposed/push-batch", { key: batchKey.trim(), confirm: true }));
+      r = await withBusy(`Pushing ${key} to krill`, post("/api/proposed/push-batch", { key, confirm: true }));
     }
     if (r.ok) push({ variant: "success", title: `Pushed ${r.pushed}/${r.total || r.pushed} to krill` });
     else push({ variant: "danger", title: "Batch push failed", description: r.error });
     load();
+    onChange();
   };
 
   const rejN = items.filter((p) => p.status === "rejected").length;
   const show = showRej ? items : items.filter((p) => p.status !== "rejected");
+  const grouped = show.reduce<Record<string, EnrichedTask[]>>((a, p) => {
+    (a[p.project_key] ||= []).push(p);
+    return a;
+  }, {});
+  const groupKeys = Object.keys(grouped).sort();
+  const pushable = (list: EnrichedTask[]) =>
+    list.filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)).length;
+  const dis = "disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
     <section>
       <p className={hint}>
-        The review gate. Each task shows <b>risk</b> + whether it&apos;ll <b>bypass</b> (🟢) or wait (🔴/🟡).
-        <b> Approve</b> → <b>Push</b>, or <b>Push batch</b> for a whole project in dependency order.
+        The review gate, <b>grouped by project</b>. Each task shows <b>risk</b> + whether it&apos;ll
+        <b> bypass</b> (🟢) or wait (🔴/🟡). Push a task alone (<b>Approve</b> → <b>Push to krill</b>) or
+        <b> Push batch</b> a whole project in dependency order.
       </p>
-      <div className="flex gap-2.5 flex-wrap">
-        <input
-          value={batchKey}
-          onChange={(e) => setBatchKey(e.target.value)}
-          placeholder="project key for batch push"
-          className="flex-1 min-w-[160px] px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
-        />
-        <button className={`${actBtn} inline-flex items-center gap-1`} onClick={pushBatch}>
-          Push batch <ArrowRight className="h-3.5 w-3.5" />
-        </button>
-      </div>
       {rejN > 0 && (
-        <p className="text-xs text-text-2 mt-3">
+        <p className="text-xs text-text-2 mt-1">
           {rejN} rejected hidden ·{" "}
           <button className={ghost} onClick={() => setShowRej((v) => !v)}>{showRej ? "hide" : "show"}</button>
         </p>
@@ -536,66 +537,76 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
       {show.length === 0 ? (
         <p className="text-text-2 mt-4">Nothing to review yet — dump requests and <b>Plan</b> a project in the Inbox tab.</p>
       ) : (
-        <ul className="mt-4 space-y-2">
-          {show.map((p) => (
-            <li key={p.id} className="p-3 border border-border rounded-lg bg-surface-2">
-              <b>{p.name}</b>
-              {p.description && <div className="text-xs text-text-2 mt-1">{p.description}</div>}
-              <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
-                <span className={`px-2 rounded-full ${p.risk_tier === "high" ? "bg-danger/20 text-danger" : p.risk_tier === "low" ? "bg-success/20 text-success" : "bg-warning/20 text-warning"}`}>
-                  {p.risk_tier || "?"} risk
+        groupKeys.map((key) => (
+          <div key={key} className="mt-4 border border-border rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-surface-2 border-b border-border">
+              <span className="text-sm">
+                <b>{key}</b>{" "}
+                <span className="text-text-2">
+                  · {grouped[key].length} task{grouped[key].length === 1 ? "" : "s"}
+                  {pushable(grouped[key]) > 0 ? `, ${pushable(grouped[key])} pushable` : ""}
                 </span>
-                <span className="px-2 rounded-full bg-border">{p.priority}</span>
-                <span className="px-2 rounded-full bg-border">{p.mode}</span>
-                <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs your review"}</span>
-                <span className="px-2 rounded-full bg-border">{p.status}</span>
-                <span className="px-2 rounded-full bg-border">{p.project_key}</span>
-                <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
-                {p.status === "pushed" && p.krill_status && (
-                  <span
-                    className={`px-2 rounded-full ${
-                      p.krill_status === "DONE"
-                        ? "bg-success/20 text-success"
-                        : p.krill_status === "CANCELED"
-                          ? "bg-muted/20 text-muted"
-                          : "bg-info/20 text-info"
-                    }`}
-                  >
-                    krill: {p.krill_status}
-                  </span>
-                )}
-              </div>
-              <div className="text-xs text-text-2 mt-1">
-                {p.rationale}
-                {p.push_error && ` · ⚠ ${p.push_error}`}
-                {JSON.parse(p.refine_log || "[]").length > 0 && (
-                  <span className="inline-flex items-center gap-0.5">
-                    {" · "}
-                    <Pencil className="h-3 w-3" /> refined {JSON.parse(p.refine_log).length}×
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2 mt-2 flex-wrap">
-                {p.status === "proposed" && (
-                  <>
-                    <button className={actBtn} onClick={() => act(p.id, "approve")}>Approve</button>
-                    <button className={danger} onClick={() => act(p.id, "reject")}>Reject</button>
-                  </>
-                )}
-                {p.status === "approved" && <button className={actBtn} onClick={() => act(p.id, "push")}>Push to krill</button>}
-                {p.status !== "pushed" && p.status !== "rejected" && (
-                  <>
-                    <button className={ghost} onClick={() => refine(p.id)}>Input</button>
-                    <button className={ghost} onClick={() => reassign(p.id)}>Reassign</button>
-                  </>
-                )}
-                <button className={`${danger} inline-flex items-center gap-1`} onClick={() => del(p.id)}>
-                  <Trash2 className="h-3.5 w-3.5" /> delete
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+              </span>
+              <button
+                className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
+                onClick={() => pushBatch(key)}
+                disabled={pushable(grouped[key]) === 0}
+                title={`Push all pushable ${key} tasks to krill (dependency-ordered)`}
+              >
+                Push batch <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <ul className="divide-y divide-border">
+              {grouped[key].map((p) => (
+                <li key={p.id} className="px-3 py-2.5">
+                  <b>{p.name}</b>
+                  {p.description && <div className="text-xs text-text-2 mt-1">{p.description}</div>}
+                  <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
+                    <span className={`px-2 rounded-full ${p.risk_tier === "high" ? "bg-danger/20 text-danger" : p.risk_tier === "low" ? "bg-success/20 text-success" : "bg-warning/20 text-warning"}`}>
+                      {p.risk_tier || "?"} risk
+                    </span>
+                    <span className="px-2 rounded-full bg-border">{p.priority}</span>
+                    <span className="px-2 rounded-full bg-border">{p.mode}</span>
+                    <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
+                    <span className="px-2 rounded-full bg-border">{p.status}</span>
+                    <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
+                    {p.status === "pushed" && p.krill_status && (
+                      <span className={`px-2 rounded-full ${p.krill_status === "DONE" ? "bg-success/20 text-success" : p.krill_status === "CANCELED" ? "bg-muted/20 text-muted" : "bg-info/20 text-info"}`}>
+                        krill: {p.krill_status}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-text-2 mt-1">
+                    {p.rationale}
+                    {p.push_error && ` · ⚠ ${p.push_error}`}
+                    {JSON.parse(p.refine_log || "[]").length > 0 && (
+                      <span className="inline-flex items-center gap-0.5">{" · "}<Pencil className="h-3 w-3" /> refined {JSON.parse(p.refine_log).length}×</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    {p.status === "proposed" && (
+                      <>
+                        <button className={actBtn} onClick={() => act(p.id, "approve")}>Approve</button>
+                        <button className={danger} onClick={() => act(p.id, "reject")}>Reject</button>
+                      </>
+                    )}
+                    {p.status === "approved" && <button className={actBtn} onClick={() => act(p.id, "push")}>Push to krill</button>}
+                    {p.status === "push_failed" && <button className={actBtn} onClick={() => act(p.id, "push")}>Retry push</button>}
+                    {p.status !== "pushed" && p.status !== "rejected" && (
+                      <>
+                        <button className={ghost} onClick={() => refine(p.id)}>Input</button>
+                        <button className={ghost} onClick={() => reassign(p.id)}>Reassign</button>
+                      </>
+                    )}
+                    <button className={`${danger} inline-flex items-center gap-1`} onClick={() => del(p.id)}>
+                      <Trash2 className="h-3.5 w-3.5" /> delete
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
       )}
     </section>
   );
