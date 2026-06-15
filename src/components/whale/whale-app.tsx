@@ -45,6 +45,7 @@ export function WhaleApp() {
   const [busy, setBusy] = useState(0);
   const [busyLabel, setBusyLabel] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
+  const [jobs, setJobs] = useState<{ kind: string; key: string }[]>([]);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   useEffect(() => {
@@ -74,6 +75,11 @@ export function WhaleApp() {
       setStatus(await j("/api/status"));
     } catch {
       setStatus(null);
+    }
+    try {
+      setJobs((await j("/api/jobs")).running || []);
+    } catch {
+      /* keep last */
     }
   }, []);
 
@@ -129,6 +135,11 @@ export function WhaleApp() {
             <Loader2 className="h-3 w-3 animate-spin" /> {busyLabel}…
           </span>
         )}
+        {jobs.length > 0 && (
+          <span className="text-xs text-info inline-flex items-center gap-1" title={jobs.map((x) => `${x.kind} ${x.key}`).join(", ")}>
+            <Loader2 className="h-3 w-3 animate-spin" /> {jobs.length} running
+          </span>
+        )}
         <button onClick={toggleTheme} className="ml-auto p-1.5 rounded-lg text-text-2 hover:text-text" title="Toggle dark/light">
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
@@ -155,10 +166,10 @@ export function WhaleApp() {
         {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
             switch, like the original display:none UI. Polling is gated by `active`. */}
         <div hidden={tab !== "inbox"}>
-          <InboxTab withBusy={withBusy} onChange={loadStatus} active={tab === "inbox"} rev={rev} />
+          <InboxTab withBusy={withBusy} onChange={loadStatus} active={tab === "inbox"} rev={rev} jobs={jobs} />
         </div>
         <div hidden={tab !== "context"}>
-          <ContextTab withBusy={withBusy} rev={rev} />
+          <ContextTab withBusy={withBusy} rev={rev} jobs={jobs} />
         </div>
         <div hidden={tab !== "proposed"}>
           <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} rev={rev} />
@@ -182,7 +193,8 @@ const actBtn = `${btn} bg-success text-white`;
 const ghost = `${btn} bg-surface-2 text-text border border-border`;
 const danger = `${btn} bg-danger/10 text-danger border border-danger/40`;
 
-function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number }) {
+function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number; jobs: { kind: string; key: string }[] }) {
+  const isJob = (kind: string, key: string) => jobs.some((x) => x.kind === kind && x.key === key);
   const [entries, setEntries] = useState<InboxEntry[]>([]);
   const [text, setText] = useState("");
   const [project, setProject] = useState("");
@@ -212,8 +224,9 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
   };
   const planProject = async (key: string) => {
     if (!key) return;
-    const r = await withBusy(`Planning ${key} (real Claude)`, post("/api/plan", { key }));
-    push({ variant: "success", title: `Proposed ${(r.proposed || []).length} task(s) for ${key}`, description: "Review in the Proposed tab" });
+    const r = await post("/api/plan", { key });
+    if (r.running) push({ variant: "info", title: `Planning ${key}…`, description: "running in background — Proposed updates when it lands" });
+    else if (r.error) push({ variant: "danger", title: "Plan failed", description: r.error });
     load();
     onChange();
   };
@@ -296,10 +309,14 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
                   <button
                     className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
                     onClick={() => planProject(p)}
-                    disabled={pendingIn(grouped[p]) === 0}
+                    disabled={pendingIn(grouped[p]) === 0 || isJob("plan", p)}
                     title={`Plan all pending requests for ${p}`}
                   >
-                    Plan <ArrowRight className="h-3.5 w-3.5" />
+                    {isJob("plan", p) ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Planning…</>
+                    ) : (
+                      <>Plan <ArrowRight className="h-3.5 w-3.5" /></>
+                    )}
                   </button>
                 )}
               </div>
@@ -333,7 +350,8 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
   );
 }
 
-function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
+function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs: { kind: string; key: string }[] }) {
+  const isJob = (kind: string, key: string) => jobs.some((x) => x.kind === kind && x.key === key);
   const [keys, setKeys] = useState<string[]>([]);
   const [available, setAvailable] = useState<string[]>([]);
   const [obk, setObk] = useState("");
@@ -358,11 +376,10 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
   };
   const audit = async (key: string, refresh = false) => {
     if (!key) return;
-    const r = await withBusy(`${refresh ? "Auditing" : "Onboarding"} ${key} (real Claude — 1-3 min)`, post("/api/onboard", { key }));
-    if (r.ok) push({ variant: "success", title: `${refresh ? "Refreshed" : "Onboarded"} ${r.key}`, description: `${r.chars} chars of context` });
-    else push({ variant: "danger", title: "Audit failed", description: r.note || r.error });
+    const r = await post("/api/onboard", { key });
+    if (r.running) push({ variant: "info", title: `${refresh ? "Auditing" : "Onboarding"} ${key}…`, description: "running in background — context updates when it lands" });
+    else if (r.error) push({ variant: "danger", title: "Failed", description: r.error });
     load();
-    if (sel === key) view(key);
   };
   const onboardOrSeed = async () => {
     const key = obk.trim();
@@ -415,7 +432,9 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
           <p className="text-xs text-text-2 mb-1.5">krill projects not onboarded yet — click to audit:</p>
           <div className="flex gap-2 flex-wrap">
             {available.map((p) => (
-              <button key={p} className={`${ghost} !px-2.5 !py-1.5 text-sm`} onClick={() => audit(p)}>+ {p}</button>
+              <button key={p} className={`${ghost} !px-2.5 !py-1.5 text-sm inline-flex items-center gap-1 disabled:opacity-40`} onClick={() => audit(p)} disabled={isJob("onboard", p)}>
+                {isJob("onboard", p) ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> auditing {p}…</> : <>+ {p}</>}
+              </button>
             ))}
           </div>
         </div>
@@ -429,8 +448,8 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
             {keys.map((k) => (
               <span key={k} className="inline-flex items-center border border-border rounded-lg bg-surface-2">
                 <button className="px-2.5 py-1.5 text-sm text-text hover:text-primary" onClick={() => view(k)}>{k}</button>
-                <button className="px-2 py-1.5 text-text-2 hover:text-text border-l border-border" title="Re-audit (refresh context)" onClick={() => audit(k, true)}>
-                  <RotateCw className="h-3.5 w-3.5" />
+                <button className="px-2 py-1.5 text-text-2 hover:text-text border-l border-border disabled:opacity-50" title="Re-audit (refresh context)" onClick={() => audit(k, true)} disabled={isJob("onboard", k)}>
+                  {isJob("onboard", k) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
                 </button>
               </span>
             ))}
