@@ -2,13 +2,16 @@
 // human gates (new-project always gated; high-risk never auto-pushes).
 
 import { homedir } from "node:os";
-import { config } from "./config";
+import { config, isReal } from "./config";
 import {
   getProposed, updateProposed, projectKeys, setEntryLane, listProposed, getEntry,
 } from "@/db/queries";
 import { plan, route, triage, refineProposal, flowPreview } from "./stages";
 import { auditComplete } from "./runner";
-import { writeContext, listContextKeys } from "./context-store";
+import {
+  writeContext, listContextKeys, readContext, keyToSlug,
+  writeContextMeta, readContextMeta, gitHead, commitsSince,
+} from "./context-store";
 import * as krill from "./krill-client";
 import type { Team } from "./persona-loader";
 import type { ProposedTask } from "@/db/schema";
@@ -28,8 +31,11 @@ export async function onboard(team: Team, key: string) {
     `of the project.\nOUTPUT CONTRACT: return ONLY the markdown, starting with "# CONTEXT — ${key}". ` +
     `Sections: Goals, Stack, Structure, Current state, Open questions. No preamble, no code fences.`;
   const user = `Audit the repository in the working directory and output the full CONTEXT.md.`;
-  const md = await auditComplete({ system, user, model: config.models.plan, cwd: expandHome(meta.folder_path) });
+  const folder = expandHome(meta.folder_path);
+  const md = await auditComplete({ system, user, model: config.models.plan, cwd: folder });
   writeContext(key, md);
+  // Record the HEAD we audited against, so we can flag drift later.
+  writeContextMeta(key, { head: gitHead(folder), at: Date.now() });
   return { ok: true, key, chars: md.length };
 }
 
@@ -60,7 +66,39 @@ export function reassign(team: Team, id: string, projectKey: string): ProposedTa
   });
 }
 
-export const planProject = (team: Team, key: string) => plan(team, key);
+/**
+ * Plan a project. Auto-derives context on first plan: if a real-runner project
+ * has no cached context yet, run the audit once (cached after) so strategy is
+ * grounded without a manual onboard step. Best-effort — idea projects (no repo)
+ * just return needsSeed and we plan blind. Stub mode never audits.
+ */
+export async function planProject(team: Team, key: string): Promise<ProposedTask[]> {
+  if (isReal() && !readContext(key)) {
+    await onboard(team, key).catch(() => {});
+  }
+  return plan(team, key);
+}
+
+/**
+ * Staleness per onboarded context: how many commits the repo has moved since the
+ * audit. Read-only, tolerant — krill down or non-git repos just drop out of the map.
+ * Powers the "context stale — re-audit" hint in the UI.
+ */
+export async function contextStatus(): Promise<Record<string, { behind: number }>> {
+  const keys = listContextKeys();
+  if (!keys.length) return {};
+  const projects = await krill.listProjects().catch(() => []);
+  const byKey = new Map(projects.map((p) => [keyToSlug(p.name), p]));
+  const out: Record<string, { behind: number }> = {};
+  for (const k of keys) {
+    const p = byKey.get(keyToSlug(k));
+    if (!p?.has_repo) continue;
+    const head = readContextMeta(k).head;
+    if (!head) continue;
+    out[k] = { behind: commitsSince(expandHome(p.folder_path), head) };
+  }
+  return out;
+}
 
 export async function routeEntry(team: Team, entryId: string) {
   const e = getEntry(entryId);

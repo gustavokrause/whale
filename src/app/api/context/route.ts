@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { readContext, listContextKeys, writeContext, deleteContext } from "@/lib/context-store";
+import { contextStatus } from "@/lib/pipeline";
 import { json, fail } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +8,11 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const key = req.nextUrl.searchParams.get("key");
   if (key) return json({ key, md: readContext(key) });
-  return json({ keys: listContextKeys() });
+  const keys = listContextKeys();
+  // ?stale=1 adds per-key repo drift (extra krill + git work); opt-in so the
+  // plain key list stays cheap for other callers.
+  if (req.nextUrl.searchParams.get("stale")) return json({ keys, stale: await contextStatus() });
+  return json({ keys });
 }
 
 // Seed/replace a project's background context by hand (for repo-less idea projects,

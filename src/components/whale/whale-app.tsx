@@ -11,6 +11,7 @@ import {
   Sun,
   Moon,
   RotateCw,
+  AlertTriangle,
   ChevronDown,
   Inbox as InboxIcon,
   BookOpen,
@@ -453,7 +454,7 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
 function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs: { kind: string; key: string }[] }) {
   const isJob = (kind: string, key: string) => jobs.some((x) => x.kind === kind && x.key === key);
   const [keys, setKeys] = useState<string[]>([]);
-  const [available, setAvailable] = useState<string[]>([]);
+  const [stale, setStale] = useState<Record<string, { behind: number }>>({});
   const [obk, setObk] = useState("");
   const [seedMd, setSeedMd] = useState("");
   const [sel, setSel] = useState<string | null>(null);
@@ -462,10 +463,9 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
   const dlg = useDialog();
 
   const load = useCallback(async () => {
-    const k: string[] = (await j("/api/context")).keys || [];
-    setKeys(k);
-    const ps: string[] = (await j("/api/projects")).projects || [];
-    setAvailable(ps.filter((p) => !k.includes(p))); // krill projects not yet onboarded
+    const r = await j("/api/context?stale=1");
+    setKeys(r.keys || []);
+    setStale(r.stale || {});
   }, []);
   useEffect(() => {
     load();
@@ -512,9 +512,10 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
   return (
     <section>
       <p className={hint}>
-        Per-project <b>background context</b>. <b>Onboard</b> = read-only audit of the repo; or <b>paste</b> context
-        to seed it by hand (idea projects with no repo). It <b>grounds Plan</b> — it&apos;s not where tasks live
-        (those are requests in Inbox). <b>Audit ↻</b> re-runs the repo audit.
+        Per-project <b>background context</b> that <b>grounds Plan</b>. Planning a repo project
+        <b> auto-builds</b> this on first run — onboard by hand only to seed an <b>idea project</b> (no repo)
+        or pre-build it. <b>Audit ↻</b> re-runs the audit; the <span className="text-warning">⚠ N</span> badge
+        means the repo moved N commits since the last audit.
       </p>
       <div className="space-y-2.5">
         <input
@@ -537,20 +538,8 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
           {seedMd.trim() ? "Seed context" : "Onboard (audit repo)"} <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
-      {available.length > 0 && (
-        <div className="mt-3">
-          <p className="text-xs text-text-2 mb-1.5">krill projects not onboarded yet — click to audit:</p>
-          <div className="flex gap-2 flex-wrap">
-            {available.map((p) => (
-              <button key={p} className={`${ghost} !px-2.5 !py-1.5 text-sm inline-flex items-center gap-1 disabled:opacity-40`} onClick={() => audit(p)} disabled={isJob("onboard", p)}>
-                {isJob("onboard", p) ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> auditing {p}…</> : <>+ {p}</>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       {keys.length === 0 ? (
-        <p className="text-text-2 mt-4">No context yet. Onboard a project above to build its background.</p>
+        <p className="text-text-2 mt-4">No context yet — it builds automatically when you Plan a repo project, or seed an idea project above.</p>
       ) : (
         <>
           <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">onboarded projects</h3>
@@ -558,6 +547,12 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
             {keys.map((k) => (
               <span key={k} className="inline-flex items-center border border-border rounded-lg bg-surface-2">
                 <button className="px-2.5 py-1.5 text-sm text-text hover:text-primary" onClick={() => view(k)}>{k}</button>
+                {stale[k]?.behind ? (
+                  <span title={`Repo moved ${stale[k].behind} commit(s) since the audit — re-audit to refresh`} className="pr-1.5 text-warning text-xs font-mono inline-flex items-center gap-0.5">
+                    <AlertTriangle className="h-3 w-3" />
+                    {stale[k].behind}
+                  </span>
+                ) : null}
                 <button className="px-2 py-1.5 text-text-2 hover:text-text border-l border-border disabled:opacity-50" title="Re-audit (refresh context)" onClick={() => audit(k, true)} disabled={isJob("onboard", k)}>
                   {isJob("onboard", k) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
                 </button>
