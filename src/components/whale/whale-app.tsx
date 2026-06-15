@@ -188,9 +188,10 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
 
   const load = useCallback(async () => {
     setEntries((await j("/api/inbox")).entries);
-    const ps: string[] = (await j("/api/projects")).projects || [];
+    // only ONBOARDED projects (those with context) are dumpable — Onboard gates it
+    const ps: string[] = (await j("/api/context")).keys || [];
     setProjects(ps);
-    setProject((p) => p || ps[0] || "");
+    setProject((p) => (p && ps.includes(p) ? p : ps[0] || ""));
   }, []);
   useEffect(() => {
     load();
@@ -302,13 +303,19 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
 
 function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
   const [keys, setKeys] = useState<string[]>([]);
+  const [available, setAvailable] = useState<string[]>([]);
   const [obk, setObk] = useState("");
   const [seedMd, setSeedMd] = useState("");
   const [sel, setSel] = useState<string | null>(null);
   const [md, setMd] = useState("");
   const { push } = useToast();
 
-  const load = useCallback(async () => setKeys((await j("/api/context")).keys), []);
+  const load = useCallback(async () => {
+    const k: string[] = (await j("/api/context")).keys || [];
+    setKeys(k);
+    const ps: string[] = (await j("/api/projects")).projects || [];
+    setAvailable(ps.filter((p) => !k.includes(p))); // krill projects not yet onboarded
+  }, []);
   useEffect(() => {
     load();
   }, [load, rev]);
@@ -371,6 +378,16 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
           {seedMd.trim() ? "Seed context" : "Onboard (audit repo)"} <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
+      {available.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs text-text-2 mb-1.5">krill projects not onboarded yet — click to audit:</p>
+          <div className="flex gap-2 flex-wrap">
+            {available.map((p) => (
+              <button key={p} className={`${ghost} !px-2.5 !py-1.5 text-sm`} onClick={() => audit(p)}>+ {p}</button>
+            ))}
+          </div>
+        </div>
+      )}
       {keys.length === 0 ? (
         <p className="text-text-2 mt-4">No context yet. Onboard a project above to build its background.</p>
       ) : (
