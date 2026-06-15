@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Loader2, Circle, Trash2, ArrowRight, Pencil, Sun, Moon } from "lucide-react";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
 type Status = {
@@ -42,6 +43,19 @@ export function WhaleApp() {
   const [busy, setBusy] = useState(0);
   const [busyLabel, setBusyLabel] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    setTheme((document.documentElement.dataset.theme as "dark" | "light") || "dark");
+  }, []);
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem("whale-theme", next);
+    } catch {}
+    setTheme(next);
+  };
 
   const withBusy = useCallback(async <T,>(label: string, p: Promise<T>): Promise<T> => {
     setBusy((n) => n + 1);
@@ -80,14 +94,25 @@ export function WhaleApp() {
   return (
     <div>
       {busy > 0 && <div className="fixed top-0 left-0 h-0.5 w-[30%] bg-primary animate-[ind_1.1s_linear_infinite] z-10" />}
-      <header className="px-5 py-3 border-b border-border flex flex-wrap items-baseline gap-x-3">
+      <header className="px-5 py-3 border-b border-border flex flex-wrap items-center gap-x-3">
         <b className="text-lg">🐋 whale</b>
-        <span className="text-xs text-text-2">
-          {status
-            ? `runner=${status.runner} · bypass=${status.autonomy.bypass} · autoPush=${status.autonomy.autoPush} · krill ${status.krill.up ? "🟢" : "🔴"} · inbox ${status.inbox.raw}/${status.inbox.total} · proposed ${status.proposed.total}`
-            : "…"}
-        </span>
-        {busy > 0 && <span className="text-xs text-warning">⏳ {busyLabel}…</span>}
+        {status ? (
+          <span className="text-xs text-text-2 inline-flex items-center gap-1">
+            runner={status.runner} · bypass={status.autonomy.bypass} · autoPush={String(status.autonomy.autoPush)} · krill
+            <Circle className={`h-2.5 w-2.5 ${status.krill.up ? "fill-success text-success" : "fill-danger text-danger"}`} />
+            · inbox {status.inbox.raw}/{status.inbox.total} · proposed {status.proposed.total}
+          </span>
+        ) : (
+          <span className="text-xs text-text-2">…</span>
+        )}
+        {busy > 0 && (
+          <span className="text-xs text-warning inline-flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" /> {busyLabel}…
+          </span>
+        )}
+        <button onClick={toggleTheme} className="ml-auto p-1.5 rounded-lg text-text-2 hover:text-text" title="Toggle dark/light">
+          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </button>
       </header>
 
       <nav className="flex gap-1 px-5 pt-3">
@@ -194,7 +219,9 @@ function InboxTab({ withBusy, onChange, active }: { withBusy: Busy; onChange: ()
           className="flex-1 min-w-[160px] px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
         />
         <button className={actBtn} onClick={dump}>Dump</button>
-        <button className={ghost} onClick={distill}>Distill all →</button>
+        <button className={`${ghost} inline-flex items-center gap-1`} onClick={distill}>
+          Distill all <ArrowRight className="h-3.5 w-3.5" />
+        </button>
       </div>
       <ul className="mt-4 space-y-2">
         {entries.length === 0 && <li className="text-text-2">empty — drop your first thing above.</li>}
@@ -207,7 +234,9 @@ function InboxTab({ withBusy, onChange, active }: { withBusy: Busy; onChange: ()
               {e.project_hint && <span className="px-2 rounded-full bg-border">{e.project_hint}</span>}
               <span>{new Date(e.created_at).toLocaleString()}</span>
               <button className={ghost} onClick={() => route(e.id)}>route?</button>
-              <button className={danger} onClick={() => del(e.id)}>✕</button>
+              <button className={`${danger} inline-flex items-center`} title="Delete note" onClick={() => del(e.id)}>
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
           </li>
         ))}
@@ -256,7 +285,9 @@ function ContextTab({ withBusy }: { withBusy: Busy }) {
           placeholder="project key to onboard (e.g. arqtrack, whale)"
           className="flex-1 min-w-[160px] px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
         />
-        <button className={ghost} onClick={onboard}>Onboard →</button>
+        <button className={`${ghost} inline-flex items-center gap-1`} onClick={onboard}>
+          Onboard <ArrowRight className="h-3.5 w-3.5" />
+        </button>
       </div>
       {keys.length === 0 ? (
         <p className="text-text-2 mt-4">No context yet. Dump things in Inbox, then Distill all.</p>
@@ -274,7 +305,9 @@ function ContextTab({ withBusy }: { withBusy: Busy }) {
         <div className="mt-4">
           <div className="flex items-center gap-2.5 mb-3">
             <b>{sel}</b>
-            <button className={actBtn} onClick={() => plan(sel)}>Plan this →</button>
+            <button className={`${actBtn} inline-flex items-center gap-1`} onClick={() => plan(sel)}>
+              Plan this <ArrowRight className="h-3.5 w-3.5" />
+            </button>
           </div>
           <pre className="whitespace-pre-wrap bg-surface-2 border border-border rounded-lg p-3.5 font-mono text-sm">{md}</pre>
         </div>
@@ -357,7 +390,9 @@ function ProposedTab({ withBusy, onChange, active }: { withBusy: Busy; onChange:
           placeholder="project key for batch push"
           className="flex-1 min-w-[160px] px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
         />
-        <button className={actBtn} onClick={pushBatch}>Push batch →</button>
+        <button className={`${actBtn} inline-flex items-center gap-1`} onClick={pushBatch}>
+          Push batch <ArrowRight className="h-3.5 w-3.5" />
+        </button>
       </div>
       {rejN > 0 && (
         <p className="text-xs text-text-2 mt-3">
@@ -400,7 +435,12 @@ function ProposedTab({ withBusy, onChange, active }: { withBusy: Busy; onChange:
               <div className="text-xs text-text-2 mt-1">
                 {p.rationale}
                 {p.push_error && ` · ⚠ ${p.push_error}`}
-                {JSON.parse(p.refine_log || "[]").length > 0 && ` · ✎ refined ${JSON.parse(p.refine_log).length}×`}
+                {JSON.parse(p.refine_log || "[]").length > 0 && (
+                  <span className="inline-flex items-center gap-0.5">
+                    {" · "}
+                    <Pencil className="h-3 w-3" /> refined {JSON.parse(p.refine_log).length}×
+                  </span>
+                )}
               </div>
               <div className="flex gap-2 mt-2 flex-wrap">
                 {p.status === "proposed" && (
@@ -416,7 +456,9 @@ function ProposedTab({ withBusy, onChange, active }: { withBusy: Busy; onChange:
                     <button className={ghost} onClick={() => reassign(p.id)}>Reassign</button>
                   </>
                 )}
-                <button className={danger} onClick={() => del(p.id)}>✕ delete</button>
+                <button className={`${danger} inline-flex items-center gap-1`} onClick={() => del(p.id)}>
+                  <Trash2 className="h-3.5 w-3.5" /> delete
+                </button>
               </div>
             </li>
           ))}

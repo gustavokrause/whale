@@ -2,8 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* whale is dark-only (matches the original LAN UI palette). Tokens mirror krill's
-   names so krill's component primitives can be reused verbatim. */
+/* Tokens mirror krill's names so its component primitives reuse verbatim.
+   whale is dark-first; light is opt-in via the header toggle (data-theme). */
 :root,
 [data-theme="dark"] {
   --bg: 13 17 23;
@@ -20,6 +20,23 @@
   --info: 93 170 221;
   --warning: 227 201 105;
   --muted: 110 118 129;
+}
+
+[data-theme="light"] {
+  --bg: 255 255 255;
+  --surface: 246 248 250;
+  --surface-2: 255 255 255;
+  --text: 31 35 40;
+  --text-2: 87 96 106;
+  --text-3: 110 119 129;
+  --border: 208 215 222;
+  --border-strong: 175 184 193;
+  --primary: 9 105 218;
+  --success: 26 127 55;
+  --danger: 207 34 46;
+  --info: 9 105 218;
+  --warning: 154 103 0;
+  --muted: 110 119 129;
 }
 
 html,
