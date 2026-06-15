@@ -136,7 +136,7 @@ export function WhaleApp() {
               onClick={() => go(t)}
               className={`px-4 py-2 rounded-t-lg text-sm capitalize border border-b-0 ${
                 tab === t
-                  ? "text-white border-border bg-gradient-to-b from-primary to-white -mb-px relative z-10"
+                  ? "border-border text-white bg-gradient-to-b from-primary to-white dark:bg-none dark:bg-surface dark:text-text -mb-px relative z-10"
                   : "text-text-2 border-transparent hover:text-text"
               }`}
             >
@@ -145,7 +145,7 @@ export function WhaleApp() {
           ))}
         </nav>
 
-        <main className="border border-border rounded-lg bg-surface p-5">
+        <main className="border border-border rounded-lg bg-bg dark:bg-surface p-5">
         {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
             switch, like the original display:none UI. Polling is gated by `active`. */}
         <div hidden={tab !== "inbox"}>
