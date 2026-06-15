@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Circle, Trash2, ArrowRight, Pencil, Sun, Moon } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { WhaleIcon } from "@/components/app/whale-icon";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
 type Status = {
@@ -108,7 +109,9 @@ export function WhaleApp() {
     <div>
       {busy > 0 && <div className="fixed top-0 left-0 h-0.5 w-[30%] bg-primary animate-[ind_1.1s_linear_infinite] z-10" />}
       <header className="px-5 py-3 border-b border-border flex flex-wrap items-center gap-x-3">
-        <b className="text-lg">🐋 whale</b>
+        <b className="text-lg inline-flex items-center gap-1.5">
+          <WhaleIcon className="h-5 w-5 text-primary" /> whale
+        </b>
         {status ? (
           <span className="text-xs text-text-2 inline-flex items-center gap-1">
             runner={status.runner} · bypass={status.autonomy.bypass} · autoPush={String(status.autonomy.autoPush)} · krill
