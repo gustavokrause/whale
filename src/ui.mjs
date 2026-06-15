@@ -39,10 +39,10 @@ export const PAGE = `<!doctype html><html lang="en"><head>
   <div class="flow"><b>Dump</b> → <b>Distill</b> (→ Context) → <b>Plan</b> (→ Proposed) → <b>Approve</b> → <b>Push to krill</b></div>
 </header>
 <nav>
-  <button class="on" onclick="tab('inbox',this)">Inbox</button>
-  <button onclick="tab('context',this)">Context</button>
-  <button onclick="tab('proposed',this)">Proposed</button>
-  <button onclick="tab('settings',this)">Settings</button>
+  <button data-tab="inbox" onclick="location.hash='inbox'">Inbox</button>
+  <button data-tab="context" onclick="location.hash='context'">Context</button>
+  <button data-tab="proposed" onclick="location.hash='proposed'">Proposed</button>
+  <button data-tab="settings" onclick="location.hash='settings'">Settings</button>
 </nav>
 <main>
   <section id="inbox">
@@ -79,9 +79,18 @@ export const PAGE = `<!doctype html><html lang="en"><head>
 </main>
 <script>
 const j=(u,o)=>fetch(u,o).then(r=>r.json());
-function tab(id,btn){for(const s of ['inbox','context','proposed','settings'])document.getElementById(s).style.display=s===id?'':'none';
-  for(const b of document.querySelectorAll('nav button'))b.classList.toggle('on',b===btn);
-  if(id==='context')loadContext(); if(id==='proposed')loadProposed(); if(id==='settings')loadSettings();}
+const TABS=['inbox','context','proposed','settings'];
+const curTab=()=>{const h=location.hash.slice(1);return TABS.includes(h)?h:'inbox';};
+function applyTab(){const id=curTab();
+  for(const s of TABS)document.getElementById(s).style.display=s===id?'':'none';
+  for(const b of document.querySelectorAll('nav button'))b.classList.toggle('on',b.dataset.tab===id);
+  if(id==='inbox')loadInbox(); else if(id==='context')loadContext(); else if(id==='proposed')loadProposed(); else if(id==='settings')loadSettings();}
+window.addEventListener('hashchange',applyTab);
+// Live refresh: poll the active LIST view (inbox/proposed) while the tab is
+// visible; skip context/settings (would wipe an open CONTEXT or unsaved form).
+function refreshActive(){const id=curTab(); if(id==='inbox')loadInbox(); else if(id==='proposed')loadProposed();}
+setInterval(()=>{ if(!document.hidden) refreshActive(); }, 5000);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ status(); refreshActive(); } });
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 
 async function status(){const h=await j('/api/health');document.getElementById('status').textContent=
@@ -169,6 +178,6 @@ async function saveSettings(){const v=id=>document.getElementById(id);
   const r=await j('/api/config',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r.error){alert('⚠ '+r.error);return;} alert('Saved — applied live.'); status(); loadSettings();}
 
-status();loadInbox();
+status();applyTab();
 document.getElementById('t').addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter')dump();});
 </script></body></html>`;
