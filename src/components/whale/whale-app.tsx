@@ -191,7 +191,8 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
     // only ONBOARDED projects (those with context) are dumpable — Onboard gates it
     const ps: string[] = (await j("/api/context")).keys || [];
     setProjects(ps);
-    setProject((p) => (p && ps.includes(p) ? p : ps[0] || ""));
+    // default to "" (unassigned/capture); keep a still-valid selection
+    setProject((p) => (p && ps.includes(p) ? p : ""));
   }, []);
   useEffect(() => {
     load();
