@@ -136,7 +136,7 @@ export function WhaleApp() {
               onClick={() => go(t)}
               className={`px-4 py-2 rounded-t-lg text-sm capitalize border border-b-0 ${
                 tab === t
-                  ? "text-white border-border bg-gradient-to-b from-primary to-surface -mb-px relative z-10"
+                  ? "text-white border-border bg-gradient-to-b from-primary to-white -mb-px relative z-10"
                   : "text-text-2 border-transparent hover:text-text"
               }`}
             >
