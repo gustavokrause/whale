@@ -34,8 +34,15 @@ export const PAGE = `<!doctype html><html lang="en"><head>
   .empty{color:#7d8590}
   pre{white-space:pre-wrap;background:#0f141a;border:1px solid #21262d;border-radius:8px;padding:14px;font:inherit}
   h3{margin:18px 0 8px;color:#9aa4ad;font-size:13px;text-transform:uppercase;letter-spacing:.05em}
+  #bar{position:fixed;top:0;left:-30%;height:2px;width:30%;background:#2f81f7;z-index:9;opacity:0}
+  body.busy #bar{opacity:1;animation:ind 1.1s linear infinite}
+  @keyframes ind{0%{left:-30%}100%{left:100%}}
+  body.busy{cursor:progress}
+  body.busy main button{opacity:.55;pointer-events:none}
+  #busy{color:#e3c969}
 </style></head><body>
-<header><b>🐋 whale</b><span class="s" id="status">…</span>
+<div id="bar"></div>
+<header><b>🐋 whale</b><span class="s" id="status">…</span><span class="s" id="busy"></span>
   <div class="flow"><b>Dump</b> → <b>Distill</b> (→ Context) → <b>Plan</b> (→ Proposed) → <b>Approve</b> → <b>Push to krill</b></div>
 </header>
 <nav>
@@ -93,8 +100,19 @@ setInterval(()=>{ if(!document.hidden) refreshActive(); }, 5000);
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ status(); refreshActive(); } });
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 
-async function status(){const h=await j('/api/health');document.getElementById('status').textContent=
-  'runner='+h.runner+' · bypass='+h.autonomy.bypass+' · autoPush='+h.autonomy.autoPush;}
+// global async/loading state — every long call goes through withBusy so the user
+// sees the app is working during the 1-3 min real-Claude waits.
+let _busy=0,_label='';
+function renderBusy(){document.body.classList.toggle('busy',_busy>0);
+  document.getElementById('busy').textContent=_busy>0?('⏳ '+_label+'…'):'';}
+async function withBusy(label,p){_busy++;_label=label;renderBusy();
+  try{return await p;}finally{_busy--;renderBusy();}}
+
+async function status(){try{const s=await j('/api/status');const dot=s.krill.up?'🟢':'🔴';
+  document.getElementById('status').textContent=
+    'runner='+s.runner+' · bypass='+s.autonomy.bypass+' · autoPush='+s.autonomy.autoPush+
+    ' · krill '+dot+' · inbox '+s.inbox.raw+'/'+s.inbox.total+' · proposed '+s.proposed.total;
+  }catch{document.getElementById('status').textContent='status unavailable';}}
 
 async function loadInbox(){const {entries}=await j('/api/inbox');const l=document.getElementById('ilist');
   if(!entries.length){l.innerHTML='<li class="empty">empty — drop your first thing above.</li>';return;}
@@ -106,13 +124,13 @@ async function loadInbox(){const {entries}=await j('/api/inbox');const l=documen
 async function dump(){const t=document.getElementById('t'),h=document.getElementById('hint');
   if(!t.value.trim())return; await j('/api/inbox',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({text:t.value.trim(),project_hint:h.value.trim()||null})}); t.value='';h.value='';t.focus();loadInbox();}
-async function distill(){const r=await j('/api/distill',{method:'POST'});
+async function distill(){const r=await withBusy('Distilling all notes',j('/api/distill',{method:'POST'}));
   alert('Distilled '+r.distilled+' note(s) → Context for: '+(r.keys||[]).map(k=>k.key).join(', ')+'\\n\\nOpen the Context tab to read them.'); loadInbox();}
-async function route(id){const r=await j('/api/route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+async function route(id){const r=await withBusy('Routing note',j('/api/route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}));
   alert('Filed as: '+r.lane+(r.projectKey?' ['+r.projectKey+']':'')+(r.question?'\\n'+r.question:'')+(r.gated?'\\n('+r.note+')':'')+'\\n\\nwhy: '+(r.reason||'')); loadInbox();}
 
 async function onboard(){const k=document.getElementById('obk').value.trim(); if(!k)return;
-  const r=await j('/api/onboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+  const r=await withBusy('Auditing '+k+' (real Claude — can take 1-3 min)',j('/api/onboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}));
   alert(r.ok?('Onboarded '+r.key+' → CONTEXT ('+r.chars+' chars). Open it below.'):('⚠ '+(r.note||r.error))); document.getElementById('obk').value=''; loadContext();}
 async function loadContext(){const {keys}=await j('/api/context');const el=document.getElementById('ctxbody');
   if(!keys.length){el.innerHTML='<p class="empty">No context yet. Dump things in Inbox, then hit <b>Distill all</b>.</p>';return;}
@@ -120,11 +138,11 @@ async function loadContext(){const {keys}=await j('/api/context');const el=docum
 async function viewCtx(k){const {md}=await j('/api/context?key='+encodeURIComponent(k));
   document.getElementById('ctxview').innerHTML='<div class="row" style="margin:14px 0"><b>'+esc(k)+
     '</b><button class="act" onclick="plan(\\''+k+'\\')" title="Run the planner (Augusto+Maria) over this context to propose tasks.">Plan this →</button></div><pre>'+esc(md||'(empty)')+'</pre>';}
-async function plan(k){const r=await j('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+async function plan(k){const r=await withBusy('Planning '+k+' (real Claude)',j('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}));
   alert('Proposed '+(r.proposed||[]).length+' task(s) for '+k+'.\\n\\nReview them in the Proposed tab.');}
 
 async function pushBatch(){const k=document.getElementById('batchk').value.trim(); if(!k)return;
-  const post=(body)=>j('/api/proposed/push-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const post=(body)=>withBusy('Pushing batch to krill',j('/api/proposed/push-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}));
   let r=await post({key:k});
   if(r.needsConfirm){ if(!confirm('⚠ ARM AUTO-FINISH\\n\\n'+r.message)){loadProposed();return;} r=await post({key:k,confirm:true}); }
   alert(r.ok?('Pushed '+r.pushed+'/'+(r.total||r.pushed)+' to krill (dependency-ordered).'):('⚠ '+r.error)); loadProposed();}
@@ -148,14 +166,14 @@ async function loadProposed(){const {proposed}=await j('/api/proposed');const el
     '</li>').join('')+'</ul>';}
 function flowOf(p){ if(p.risk_tier==='high')return '🔴 full review'; if(p.auto_publish)return '🟢 auto-finish→DONE'; if(p.bypass)return '🟡 →deliverable'; return 'plan review'; }
 async function refineTask(id){const input=prompt('Input — what should change about this task?'); if(!input)return;
-  const r=await j('/api/proposed/'+id+'/refine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input})});
+  const r=await withBusy('Refining task (real Claude)',j('/api/proposed/'+id+'/refine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input})}));
   if(r.error){alert('⚠ '+r.error);} else {alert('Refined → '+r.task.name+'\\nflow: '+r.flow);} loadProposed();}
-async function pAct(id,a){const post=(body)=>j('/api/proposed/'+id+'/'+a,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+async function pAct(id,a){const post=(body)=>withBusy(a,j('/api/proposed/'+id+'/'+a,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}));
   let r=await post();
   if(r.needsConfirm){ if(!confirm('⚠ ARM AUTO-FINISH\\n\\n'+r.message)){loadProposed();return;} r=await post({confirm:true}); }
   if(r.error)alert('⚠ '+r.error); else if(r.note)alert(r.note); else if(r.pushed)alert('Pushed to krill as '+(r.task&&r.task.krill_task_id||'?')); loadProposed();}
 async function reassignTask(id){const k=prompt('Reassign to which project? (e.g. whale, krill, arqtrack, mv)'); if(!k)return;
-  const r=await j('/api/proposed/'+id+'/reassign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_key:k.trim()})});
+  const r=await withBusy('Reassigning + re-triaging',j('/api/proposed/'+id+'/reassign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_key:k.trim()})}));
   if(r.error)alert('⚠ '+r.error); loadProposed();}
 
 const opt=(val,opts)=>opts.map(o=>'<option'+(o===val?' selected':'')+'>'+o+'</option>').join('');
@@ -175,7 +193,7 @@ async function loadSettings(){const c=await j('/api/config');const el=document.g
 async function saveSettings(){const v=id=>document.getElementById(id);
   const body={runner:v('s_runner').value,model_distill:v('s_md').value,model_plan:v('s_mp').value,model_route:v('s_mr').value,
     bypass:v('s_bypass').value,auto_push:v('s_autopush').checked,allow_new_projects:v('s_allownew').checked};
-  const r=await j('/api/config',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const r=await withBusy('Saving settings',j('/api/config',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}));
   if(r.error){alert('⚠ '+r.error);return;} alert('Saved — applied live.'); status(); loadSettings();}
 
 status();applyTab();

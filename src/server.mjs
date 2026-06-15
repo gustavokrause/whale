@@ -7,8 +7,9 @@ import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { config, setConfigOverrides, configSnapshot } from "./config.mjs";
-import { openDb, addEntry, listEntries, readConfig, writeConfig } from "./db.mjs";
+import { openDb, addEntry, listEntries, rawEntries, readConfig, writeConfig } from "./db.mjs";
 import { listProposed } from "./db.mjs";
+import { ping as krillPing } from "./krill-client.mjs";
 import { loadTeam } from "./persona-loader.mjs";
 import { readContext, listContextKeys } from "./context-store.mjs";
 import { distillAll, planProject, approve, reject, push, routeEntry, reassign, onboard, pushBatch, refine } from "./pipeline.mjs";
@@ -77,6 +78,20 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && url.pathname === "/") return send(res, 200, PAGE, "text/html; charset=utf-8");
     if (method === "GET" && url.pathname === "/api/health")
       return send(res, 200, { ok: true, runner: config.runner, autonomy: config.autonomy, db: DB_PATH });
+
+    // status: one aggregate for the global header (dials + counts + krill reachable)
+    if (method === "GET" && url.pathname === "/api/status") {
+      const proposed = listProposed(db);
+      const byStatus = {};
+      for (const p of proposed) byStatus[p.status] = (byStatus[p.status] || 0) + 1;
+      return send(res, 200, {
+        runner: config.runner,
+        autonomy: { bypass: config.autonomy.bypass, autoPush: config.autonomy.autoPush },
+        inbox: { total: listEntries(db, 1000).length, raw: rawEntries(db).length },
+        proposed: { total: proposed.length, byStatus },
+        krill: { up: await krillPing(), url: config.krill.baseUrl },
+      });
+    }
 
     // config (UI-overridable subset; protected stays env-only)
     if (method === "GET" && url.pathname === "/api/config")
