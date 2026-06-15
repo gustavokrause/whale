@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { config, setConfigOverrides, configSnapshot } from "./config.mjs";
-import { openDb, addEntry, listEntries, rawEntries, readConfig, writeConfig } from "./db.mjs";
+import { openDb, addEntry, listEntries, rawEntries, readConfig, writeConfig, deleteEntry, deleteProposed } from "./db.mjs";
 import { listProposed } from "./db.mjs";
 import { ping as krillPing } from "./krill-client.mjs";
 import { loadTeam } from "./persona-loader.mjs";
@@ -109,6 +109,8 @@ const server = createServer(async (req, res) => {
       const b = await readJson(req);
       return send(res, 201, { entry: addEntry(db, { text: b.text, projectHint: b.project_hint || null, source: b.source || "manual" }) });
     }
+    if (method === "DELETE" && seg[0] === "api" && seg[1] === "inbox" && seg[2])
+      return (deleteEntry(db, seg[2]), send(res, 200, { ok: true }));
 
     // distill
     if (method === "POST" && url.pathname === "/api/distill")
@@ -144,6 +146,8 @@ const server = createServer(async (req, res) => {
     // proposed
     if (method === "GET" && url.pathname === "/api/proposed")
       return send(res, 200, { proposed: listProposed(db, url.searchParams.get("status") || undefined) });
+    if (method === "DELETE" && seg[0] === "api" && seg[1] === "proposed" && seg[2] && !seg[3])
+      return (deleteProposed(db, seg[2]), send(res, 200, { ok: true }));
     if (method === "POST" && seg[0] === "api" && seg[1] === "proposed" && seg[3]) {
       const id = seg[2], action = seg[3];
       if (action === "approve") return send(res, 200, await approve(await getTeam(), db, id));

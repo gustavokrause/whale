@@ -120,7 +120,8 @@ async function loadInbox(){const {entries}=await j('/api/inbox');const l=documen
     (e.lane?'<span class="pill lane-'+e.lane+'">'+e.lane.replace('_',' ')+'</span>':'')+
     (e.project_hint?'<span class="pill">'+esc(e.project_hint)+'</span>':'')+
     '<span>'+new Date(e.created_at).toLocaleString()+'</span>'+
-    '<button class="ghost" onclick="route(\\''+e.id+'\\')" title="Ask the router where this note belongs, and file it.">route?</button></div></li>').join('');}
+    '<button class="ghost" onclick="route(\\''+e.id+'\\')" title="Ask the router where this note belongs, and file it.">route?</button>'+
+    '<button class="ghost danger" onclick="delEntry(\\''+e.id+'\\')" title="Delete this note permanently.">✕</button></div></li>').join('');}
 async function dump(){const t=document.getElementById('t'),h=document.getElementById('hint');
   if(!t.value.trim())return; await j('/api/inbox',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({text:t.value.trim(),project_hint:h.value.trim()||null})}); t.value='';h.value='';t.focus();loadInbox();}
@@ -147,8 +148,11 @@ async function pushBatch(){const k=document.getElementById('batchk').value.trim(
   if(r.needsConfirm){ if(!confirm('⚠ ARM AUTO-FINISH\\n\\n'+r.message)){loadProposed();return;} r=await post({key:k,confirm:true}); }
   alert(r.ok?('Pushed '+r.pushed+'/'+(r.total||r.pushed)+' to krill (dependency-ordered).'):('⚠ '+r.error)); loadProposed();}
 async function loadProposed(){const {proposed}=await j('/api/proposed');const el=document.getElementById('propbody');
-  if(!proposed.length){el.innerHTML='<p class="empty">Nothing proposed yet. Distill, then Plan a project in the Context tab.</p>';return;}
-  el.innerHTML='<ul>'+proposed.map(p=>'<li><b>'+esc(p.name)+'</b>'+(p.description?'<div class="meta">'+esc(p.description)+'</div>':'')+
+  const rejN=proposed.filter(p=>p.status==='rejected').length;
+  const show=window._showRej?proposed:proposed.filter(p=>p.status!=='rejected');
+  const hdr=rejN?'<p class="meta">'+rejN+' rejected hidden · <button class="ghost" onclick="window._showRej=!window._showRej;loadProposed()">'+(window._showRej?'hide':'show')+'</button></p>':'';
+  if(!show.length){el.innerHTML=hdr+'<p class="empty">Nothing to review. Distill, then Plan a project in the Context tab.</p>';return;}
+  el.innerHTML=hdr+'<ul>'+show.map(p=>'<li><b>'+esc(p.name)+'</b>'+(p.description?'<div class="meta">'+esc(p.description)+'</div>':'')+
     '<div class="meta"><span class="pill '+(p.risk_tier||'')+'">'+(p.risk_tier||'?')+' risk</span>'+
     '<span class="pill">'+p.priority+'</span><span class="pill">'+p.mode+'</span>'+
     (p.bypass?'<span class="pill by">bypass review</span>':'<span class="pill">needs your review</span>')+
@@ -156,13 +160,14 @@ async function loadProposed(){const {proposed}=await j('/api/proposed');const el
     '<span class="pill by">flow: '+flowOf(p)+'</span></div>'+
     '<div class="meta">'+esc(p.rationale||'')+(p.push_error?' · ⚠ '+esc(p.push_error):'')+
       (JSON.parse(p.refine_log||'[]').length?' · ✎ refined '+JSON.parse(p.refine_log).length+'×':'')+'</div>'+
-    (p.status!=='pushed'?'<div class="row" style="margin-top:8px">'+
+    '<div class="row" style="margin-top:8px">'+
       (p.status==='proposed'?'<button class="act" onclick="pAct(\\''+p.id+'\\',\\'approve\\')" title="Accept this task. With autoPush off it stages for a manual push.">Approve</button>'+
-        '<button class="ghost danger" onclick="pAct(\\''+p.id+'\\',\\'reject\\')" title="Discard this proposal.">Reject</button>':'')+
+        '<button class="ghost danger" onclick="pAct(\\''+p.id+'\\',\\'reject\\')" title="Soft-discard (keeps the row, hidden by default).">Reject</button>':'')+
       (p.status==='approved'?'<button class="act" onclick="pAct(\\''+p.id+'\\',\\'push\\')" title="Send to krill as a BACKLOG task (carries the bypass flag).">Push to krill</button>':'')+
-      '<button class="ghost" onclick="refineTask(\\''+p.id+'\\')" title="Give input — whale re-evaluates the task. Repeat until you Approve/Decline.">Input</button>'+
-      '<button class="ghost" onclick="reassignTask(\\''+p.id+'\\')" title="Move to a different project and re-triage (re-runs risk + self-edit guard).">Reassign</button>'+
-      '</div>':'')+
+      (p.status!=='pushed'&&p.status!=='rejected'?'<button class="ghost" onclick="refineTask(\\''+p.id+'\\')" title="Give input — whale re-evaluates the task. Repeat until you Approve/Decline.">Input</button>'+
+        '<button class="ghost" onclick="reassignTask(\\''+p.id+'\\')" title="Move to a different project and re-triage (re-runs risk + self-edit guard).">Reassign</button>':'')+
+      '<button class="ghost danger" onclick="delProposed(\\''+p.id+'\\')" title="Delete this proposal permanently (whale-local; does not touch krill).">✕ delete</button>'+
+    '</div>'+
     '</li>').join('')+'</ul>';}
 function flowOf(p){ if(p.risk_tier==='high')return '🔴 full review'; if(p.auto_publish)return '🟢 auto-finish→DONE'; if(p.bypass)return '🟡 →deliverable'; return 'plan review'; }
 async function refineTask(id){const input=prompt('Input — what should change about this task?'); if(!input)return;
@@ -175,6 +180,8 @@ async function pAct(id,a){const post=(body)=>withBusy(a,j('/api/proposed/'+id+'/
 async function reassignTask(id){const k=prompt('Reassign to which project? (e.g. whale, krill, arqtrack, mv)'); if(!k)return;
   const r=await withBusy('Reassigning + re-triaging',j('/api/proposed/'+id+'/reassign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_key:k.trim()})}));
   if(r.error)alert('⚠ '+r.error); loadProposed();}
+async function delEntry(id){if(!confirm('Delete this note permanently?'))return; await withBusy('Deleting note',j('/api/inbox/'+id,{method:'DELETE'})); loadInbox();}
+async function delProposed(id){if(!confirm('Delete this proposal permanently?\\n(whale-local — does not touch krill.)'))return; await withBusy('Deleting',j('/api/proposed/'+id,{method:'DELETE'})); loadProposed();}
 
 const opt=(val,opts)=>opts.map(o=>'<option'+(o===val?' selected':'')+'>'+o+'</option>').join('');
 async function loadSettings(){const c=await j('/api/config');const el=document.getElementById('setbody');

@@ -152,3 +152,9 @@ export function updateProposed(db, id, fields) {
   db.prepare(`UPDATE proposed_tasks SET ${set} WHERE id = ?`).run(...keys.map((k) => fields[k]), id);
   return getProposed(db, id);
 }
+
+/* ---- hard delete (manual cleanup; whale-local only, never touches krill) ---- */
+export const deleteEntry = (db, id) =>
+  db.prepare(`DELETE FROM inbox_entries WHERE id = ?`).run(id);
+export const deleteProposed = (db, id) =>
+  db.prepare(`DELETE FROM proposed_tasks WHERE id = ?`).run(id);
