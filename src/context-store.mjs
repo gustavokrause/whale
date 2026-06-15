@@ -11,6 +11,18 @@ export const keyToSlug = (key) =>
 
 const fileFor = (key) => path.join(DIR, `${keyToSlug(key)}.md`);
 
+// Real LLM stages (distill, audit) run via `claude --print` and sometimes emit a
+// thinking preamble ("Now I have enough...", "Enough. Writing CONTEXT.md.") before
+// the contracted "# CONTEXT —" header — the text format isn't structured, so the
+// output contract can't be enforced at the model. Strip anything before the first
+// CONTEXT heading so stored memory always starts at the contract. No-op when the
+// header is already first (stub output, manual writes).
+function normalizeContext(md) {
+  const heading = (md || "").match(/^# CONTEXT\b.*$/m);
+  if (!heading) return (md || "").trim();
+  return md.slice(md.indexOf(heading[0])).trim();
+}
+
 export function readContext(key) {
   const f = fileFor(key);
   return existsSync(f) ? readFileSync(f, "utf8") : "";
@@ -18,7 +30,7 @@ export function readContext(key) {
 
 export function writeContext(key, md) {
   mkdirSync(DIR, { recursive: true });
-  writeFileSync(fileFor(key), md, "utf8");
+  writeFileSync(fileFor(key), normalizeContext(md), "utf8");
   return fileFor(key);
 }
 
