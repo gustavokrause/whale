@@ -6,8 +6,8 @@
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
-import { config } from "./config.mjs";
-import { openDb, addEntry, listEntries } from "./db.mjs";
+import { config, setConfigOverrides, configSnapshot } from "./config.mjs";
+import { openDb, addEntry, listEntries, readConfig, writeConfig } from "./db.mjs";
 import { listProposed } from "./db.mjs";
 import { loadTeam } from "./persona-loader.mjs";
 import { readContext, listContextKeys } from "./context-store.mjs";
@@ -17,6 +17,35 @@ import { PAGE } from "./ui.mjs";
 const PORT = Number(process.env.WHALE_PORT || 4100);
 const DB_PATH = process.env.WHALE_DB || path.resolve(process.cwd(), "data/whale.db");
 const db = openDb(DB_PATH);
+setConfigOverrides(readConfig(db)); // layer DB overrides over env defaults
+
+// PATCH /api/config validation — only the UI-tunable subset, with allowed values.
+// `protected` (self-edit guard) is rejected: it stays env-only by design.
+const RUNNERS = ["stub", "real"];
+const BYPASS = ["conservative", "balanced", "aggressive"];
+const MODELS = ["haiku", "sonnet", "opus"];
+function validateConfigPatch(b) {
+  if ("protected" in b)
+    throw new Error("protected is env-only (self-edit guard); not editable here");
+  const out = {};
+  if ("runner" in b) {
+    if (!RUNNERS.includes(b.runner)) throw new Error("runner must be stub|real");
+    out.runner = b.runner;
+  }
+  for (const k of ["model_distill", "model_plan", "model_route"]) {
+    if (k in b) {
+      if (!MODELS.includes(b[k])) throw new Error(`${k} must be ${MODELS.join("|")}`);
+      out[k] = b[k];
+    }
+  }
+  if ("bypass" in b) {
+    if (!BYPASS.includes(b.bypass)) throw new Error("bypass must be conservative|balanced|aggressive");
+    out.bypass = b.bypass;
+  }
+  if ("auto_push" in b) out.auto_push = b.auto_push ? 1 : 0;
+  if ("allow_new_projects" in b) out.allow_new_projects = b.allow_new_projects ? 1 : 0;
+  return out;
+}
 
 let team = null;
 async function getTeam() {
@@ -48,6 +77,16 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && url.pathname === "/") return send(res, 200, PAGE, "text/html; charset=utf-8");
     if (method === "GET" && url.pathname === "/api/health")
       return send(res, 200, { ok: true, runner: config.runner, autonomy: config.autonomy, db: DB_PATH });
+
+    // config (UI-overridable subset; protected stays env-only)
+    if (method === "GET" && url.pathname === "/api/config")
+      return send(res, 200, configSnapshot());
+    if (method === "PATCH" && url.pathname === "/api/config") {
+      const fields = validateConfigPatch(await readJson(req));
+      writeConfig(db, fields);
+      setConfigOverrides(readConfig(db)); // refresh live overrides — no restart
+      return send(res, 200, configSnapshot());
+    }
 
     // inbox
     if (method === "GET" && url.pathname === "/api/inbox") return send(res, 200, { entries: listEntries(db, 50) });

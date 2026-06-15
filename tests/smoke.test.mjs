@@ -10,11 +10,12 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 
-import { config } from "../src/config.mjs";
+import { config, isReal, setConfigOverrides } from "../src/config.mjs";
 import { loadTeam } from "../src/persona-loader.mjs";
 import {
   openDb, addEntry, listEntries, rawEntries, markEntries, setEntryLane,
   addProposed, listProposed, updateProposed, getProposed,
+  readConfig, writeConfig,
 } from "../src/db.mjs";
 import { triage, flowPreview } from "../src/stages.mjs";
 import { push, pushBatch, refine } from "../src/pipeline.mjs";
@@ -148,5 +149,35 @@ test("self-edit guard: orchestrator tasks never bypass, any dial", () => {
       assert.equal(self.risk_tier, "high", `${key} self-edit is high risk`);
       assert.equal(self.bypass, false, `${key} self-edit never bypasses (${dial})`);
     }
+  }
+});
+
+test("config: DB overrides win over env; protected stays env-only", () => {
+  const path = join(tmpdir(), `whale-cfg-${randomUUID()}.db`);
+  const db = openDb(path);
+  try {
+    // baseline = env defaults (no row)
+    setConfigOverrides(readConfig(db));
+    assert.equal(config.autonomy.bypass, "conservative", "env default dial");
+    assert.equal(isReal(), false, "env default runner is stub");
+
+    // UI write → live override
+    writeConfig(db, { runner: "real", bypass: "aggressive", auto_push: 1, model_plan: "opus" });
+    setConfigOverrides(readConfig(db));
+    assert.equal(config.autonomy.bypass, "aggressive", "override wins");
+    assert.equal(config.autonomy.autoPush, true, "bool override wins");
+    assert.equal(config.models.plan, "opus", "model override wins");
+    assert.equal(isReal(), true, "runner override wins");
+
+    // self-edit guard is never sourced from the DB layer — always env + floor
+    assert.ok(
+      config.autonomy.protected.includes("whale") && config.autonomy.protected.includes("krill"),
+      "protected floor holds regardless of overrides",
+    );
+    assert.equal("protected" in readConfig(db), false, "no protected column to override");
+  } finally {
+    setConfigOverrides({}); // reset shared module state for other test files
+    db.close?.();
+    rmSync(path, { force: true });
   }
 });

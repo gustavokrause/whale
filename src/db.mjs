@@ -41,12 +41,49 @@ export function openDb(dbPath) {
       created_at    INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS proposed_status_idx ON proposed_tasks(status);
+
+    -- Runtime config overrides (singleton). NULL column = fall back to env/default.
+    -- Only UI-tunable settings live here; the self-edit guard (WHALE_PROTECTED)
+    -- and infra wiring stay env-only by design — see docs/config-ui-overrides.md.
+    CREATE TABLE IF NOT EXISTS config (
+      id                 INTEGER PRIMARY KEY CHECK (id = 1),
+      runner             TEXT,
+      model_distill      TEXT,
+      model_plan         TEXT,
+      model_route        TEXT,
+      bypass             TEXT,
+      auto_push          INTEGER,
+      allow_new_projects INTEGER
+    );
   `);
   // idempotent migrations for pre-existing databases
   try { db.exec(`ALTER TABLE proposed_tasks ADD COLUMN auto_publish INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE proposed_tasks ADD COLUMN deps TEXT NOT NULL DEFAULT '[]'`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE proposed_tasks ADD COLUMN refine_log TEXT NOT NULL DEFAULT '[]'`); } catch { /* exists */ }
   return db;
+}
+
+/* ---- runtime config (UI-overridable subset; see config.mjs) ---- */
+
+// Columns the UI may write. NOT including the self-edit guard — that stays env-only.
+export const CONFIG_FIELDS = [
+  "runner", "model_distill", "model_plan", "model_route",
+  "bypass", "auto_push", "allow_new_projects",
+];
+
+/** The singleton override row (or {} if never set). NULL fields = not overridden. */
+export const readConfig = (db) =>
+  db.prepare(`SELECT * FROM config WHERE id = 1`).get() || {};
+
+/** Upsert the singleton, writing only the given (whitelisted) fields. */
+export function writeConfig(db, fields) {
+  db.prepare(`INSERT OR IGNORE INTO config (id) VALUES (1)`).run();
+  const keys = CONFIG_FIELDS.filter((k) => k in fields);
+  if (keys.length) {
+    const set = keys.map((k) => `${k} = ?`).join(", ");
+    db.prepare(`UPDATE config SET ${set} WHERE id = 1`).run(...keys.map((k) => fields[k]));
+  }
+  return readConfig(db);
 }
 
 /* ---- inbox ---- */

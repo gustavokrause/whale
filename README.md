@@ -96,6 +96,15 @@ The `WHALE_BYPASS` dial sets how far a task runs before it reaches you:
 Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PROJECTS=1`
 (propose new projects — creation stays human-gated), `KRILL_URL`, `PERSONAS_DIR`.
 
+### Editing config at runtime
+
+The **Settings** tab (`GET`/`PATCH /api/config`) makes the runtime dials —
+`runner`, the model tiers, `bypass`, `autoPush`, `allowNewProjects` — editable
+**live, no restart**. Precedence: **DB override wins over env**; env is the
+bootstrap default. The self-edit guard (`WHALE_PROTECTED`) and infra wiring (ports,
+paths, `KRILL_URL`) stay **env-only** and are read-only in the UI — a no-auth LAN UI
+must not be able to weaken the guard. See [docs/config-ui-overrides.md](docs/config-ui-overrides.md).
+
 ## Status
 
 All phases shipped and tested (10/10 smoke). The autonomy + execution work

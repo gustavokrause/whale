@@ -18,7 +18,8 @@ export const PAGE = `<!doctype html><html lang="en"><head>
   .hint{color:#7d8590;font-size:12.5px;margin:0 0 14px;padding:8px 12px;background:#0f141a;border:1px solid #21262d;border-left:2px solid #2d4a63;border-radius:6px}
   textarea{width:100%;min-height:110px;resize:vertical;padding:12px;background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;font:inherit}
   .row{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
-  input{flex:1;min-width:160px;padding:10px 12px;background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;font:inherit}
+  input,select{flex:1;min-width:120px;padding:10px 12px;background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;font:inherit}
+  label{display:inline-flex;align-items:center;gap:8px}label input[type=checkbox]{flex:0;min-width:0;width:16px;height:16px}
   button.act{padding:10px 16px;background:#238636;color:#fff;border:0;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
   button.ghost{padding:8px 12px;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;cursor:pointer;font:inherit}
   button.danger{background:#3d1418;color:#ff9b9b;border:1px solid #5d2026}
@@ -41,6 +42,7 @@ export const PAGE = `<!doctype html><html lang="en"><head>
   <button class="on" onclick="tab('inbox',this)">Inbox</button>
   <button onclick="tab('context',this)">Context</button>
   <button onclick="tab('proposed',this)">Proposed</button>
+  <button onclick="tab('settings',this)">Settings</button>
 </nav>
 <main>
   <section id="inbox">
@@ -70,12 +72,16 @@ export const PAGE = `<!doctype html><html lang="en"><head>
     </div>
     <div id="propbody"></div>
   </section>
+  <section id="settings" style="display:none">
+    <p class="hint">Runtime dials — saved to whale's DB and applied <b>live</b> (no restart). The <b>self-edit guard</b> (protected projects) is env-only and read-only here: a no-auth LAN UI must not be able to weaken it.</p>
+    <div id="setbody"><p class="empty">loading…</p></div>
+  </section>
 </main>
 <script>
 const j=(u,o)=>fetch(u,o).then(r=>r.json());
-function tab(id,btn){for(const s of ['inbox','context','proposed'])document.getElementById(s).style.display=s===id?'':'none';
+function tab(id,btn){for(const s of ['inbox','context','proposed','settings'])document.getElementById(s).style.display=s===id?'':'none';
   for(const b of document.querySelectorAll('nav button'))b.classList.toggle('on',b===btn);
-  if(id==='context')loadContext(); if(id==='proposed')loadProposed();}
+  if(id==='context')loadContext(); if(id==='proposed')loadProposed(); if(id==='settings')loadSettings();}
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 
 async function status(){const h=await j('/api/health');document.getElementById('status').textContent=
@@ -142,6 +148,26 @@ async function pAct(id,a){const post=(body)=>j('/api/proposed/'+id+'/'+a,{method
 async function reassignTask(id){const k=prompt('Reassign to which project? (e.g. whale, krill, arqtrack, mv)'); if(!k)return;
   const r=await j('/api/proposed/'+id+'/reassign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_key:k.trim()})});
   if(r.error)alert('⚠ '+r.error); loadProposed();}
+
+const opt=(val,opts)=>opts.map(o=>'<option'+(o===val?' selected':'')+'>'+o+'</option>').join('');
+async function loadSettings(){const c=await j('/api/config');const el=document.getElementById('setbody');
+  const M=['haiku','sonnet','opus'];
+  el.innerHTML=
+    '<h3>runner</h3><div class="row"><select id="s_runner">'+opt(c.runner,['stub','real'])+'</select></div>'+
+    '<h3>models</h3><div class="row"><label>distill <select id="s_md">'+opt(c.models.distill,M)+'</select></label>'+
+      '<label>plan <select id="s_mp">'+opt(c.models.plan,M)+'</select></label>'+
+      '<label>route <select id="s_mr">'+opt(c.models.route,M)+'</select></label></div>'+
+    '<h3>autonomy</h3><div class="row"><label>bypass <select id="s_bypass">'+opt(c.autonomy.bypass,['conservative','balanced','aggressive'])+'</select></label></div>'+
+    '<div class="row"><label><input type="checkbox" id="s_autopush"'+(c.autonomy.autoPush?' checked':'')+'/> auto-push approved tasks</label></div>'+
+    '<div class="row"><label><input type="checkbox" id="s_allownew"'+(c.autonomy.allowNewProjects?' checked':'')+'/> allow proposing new projects</label></div>'+
+    '<div class="row"><button class="act" onclick="saveSettings()" title="Apply live — no restart.">Save</button></div>'+
+    '<h3>env-locked (read-only)</h3><div class="meta"><span class="pill high">self-edit guard: '+esc((c.envLocked.protected||[]).join(', '))+'</span>'+
+      '<span class="pill">krill: '+esc(c.envLocked.krillUrl)+'</span></div>';}
+async function saveSettings(){const v=id=>document.getElementById(id);
+  const body={runner:v('s_runner').value,model_distill:v('s_md').value,model_plan:v('s_mp').value,model_route:v('s_mr').value,
+    bypass:v('s_bypass').value,auto_push:v('s_autopush').checked,allow_new_projects:v('s_allownew').checked};
+  const r=await j('/api/config',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.error){alert('⚠ '+r.error);return;} alert('Saved — applied live.'); status(); loadSettings();}
 
 status();loadInbox();
 document.getElementById('t').addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter')dump();});
