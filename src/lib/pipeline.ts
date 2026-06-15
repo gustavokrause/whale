@@ -4,11 +4,11 @@
 import { homedir } from "node:os";
 import { config } from "./config";
 import {
-  getProposed, updateProposed, projectKeys, setEntryLane, rawEntries, listProposed, getEntry,
+  getProposed, updateProposed, projectKeys, setEntryLane, listProposed, getEntry,
 } from "@/db/queries";
-import { distill, plan, route, triage, refineProposal, flowPreview } from "./stages";
+import { plan, route, triage, refineProposal, flowPreview } from "./stages";
 import { auditComplete } from "./runner";
-import { writeContext } from "./context-store";
+import { writeContext, listContextKeys } from "./context-store";
 import * as krill from "./krill-client";
 import type { Team } from "./persona-loader";
 import type { ProposedTask } from "@/db/schema";
@@ -33,29 +33,14 @@ export async function onboard(team: Team, key: string) {
   return { ok: true, key, chars: md.length };
 }
 
-export async function distillAll(team: Team) {
-  await autoRouteUntagged(team);
-  return distill(team);
-}
-
-// Route raw entries that have no project yet, so a clearly-about-X dump lands in X.
-async function autoRouteUntagged(team: Team) {
-  const untagged = rawEntries().filter((e) => !(e.project_hint || "").trim() && !e.lane);
-  if (!untagged.length) return;
-  const keys = await knownKeys();
-  for (const e of untagged) {
-    try {
-      const r = await route(team, e, keys);
-      setEntryLane(e.id, { lane: r.dest, projectHint: r.dest === "task" ? r.projectKey || null : null });
-    } catch {
-      /* leave for manual routing */
-    }
-  }
-}
-
 /** Real project targets the router can pick from: whale's own keys + krill's. */
 async function knownKeys(): Promise<string[]> {
   return [...new Set([...projectKeys(), ...(await krill.projectKeys())])];
+}
+
+/** Known project keys for the UI's project picker: krill projects + onboarded contexts. */
+export async function knownProjects(): Promise<string[]> {
+  return [...new Set([...(await krill.projectKeys()), ...listContextKeys()])].sort();
 }
 
 /** Move a proposed task to a different project and re-triage it. */

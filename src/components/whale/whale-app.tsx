@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Circle, Trash2, ArrowRight, Pencil, Sun, Moon } from "lucide-react";
+import { Loader2, Circle, Trash2, ArrowRight, Pencil, Sun, Moon, RotateCw } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { WhaleIcon } from "@/components/app/whale-icon";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
@@ -182,10 +182,16 @@ const danger = `${btn} bg-danger/10 text-danger border border-danger/40`;
 function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number }) {
   const [entries, setEntries] = useState<InboxEntry[]>([]);
   const [text, setText] = useState("");
-  const [hintVal, setHintVal] = useState("");
+  const [project, setProject] = useState("");
+  const [projects, setProjects] = useState<string[]>([]);
   const { push } = useToast();
 
-  const load = useCallback(async () => setEntries((await j("/api/inbox")).entries), []);
+  const load = useCallback(async () => {
+    setEntries((await j("/api/inbox")).entries);
+    const ps: string[] = (await j("/api/projects")).projects || [];
+    setProjects(ps);
+    setProject((p) => p || ps[0] || "");
+  }, []);
   useEffect(() => {
     load();
     const id = setInterval(() => active && !document.hidden && load(), 5000);
@@ -193,69 +199,74 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
   }, [load, active, rev]);
 
   const dump = async () => {
-    if (!text.trim()) return;
-    await withBusy("Saving note", post("/api/inbox", { text: text.trim(), project_hint: hintVal.trim() || null }));
+    if (!text.trim() || !project) return;
+    await withBusy("Saving request", post("/api/inbox", { text: text.trim(), project_hint: project }));
     setText("");
-    setHintVal("");
     load();
     onChange();
   };
-  const distill = async () => {
-    const r = await withBusy("Distilling all notes", post("/api/distill"));
-    push({ variant: "success", title: `Distilled ${r.distilled} note(s)`, description: (r.keys || []).map((k: { key: string }) => k.key).join(", ") || "—" });
+  const planProject = async () => {
+    if (!project) return;
+    const r = await withBusy(`Planning ${project} (real Claude)`, post("/api/plan", { key: project }));
+    push({ variant: "success", title: `Proposed ${(r.proposed || []).length} task(s) for ${project}`, description: "Review in the Proposed tab" });
     load();
     onChange();
-  };
-  const route = async (id: string) => {
-    const r = await withBusy("Routing note", post("/api/route", { id }));
-    push({ variant: "info", title: `Filed as ${r.lane}${r.projectKey ? ` [${r.projectKey}]` : ""}`, description: r.gated ? r.note : r.reason || "" });
-    load();
   };
   const del = async (id: string) => {
-    if (!confirm("Delete this note permanently?")) return;
-    await withBusy("Deleting note", j(`/api/inbox/${id}`, { method: "DELETE" }));
+    if (!confirm("Delete this request permanently?")) return;
+    await withBusy("Deleting", j(`/api/inbox/${id}`, { method: "DELETE" }));
     load();
     onChange();
   };
 
+  const pendingFor = (p: string) => entries.filter((e) => (e.project_hint || "") === p && e.status === "raw").length;
+  const dis = "disabled:opacity-40 disabled:cursor-not-allowed";
+
   return (
     <section>
       <p className={hint}>
-        Dump <b>anything</b> — ⌘/Ctrl-Enter to send. <b>Distill all</b> folds raw notes into per-project Context.
-        <b> route?</b> files one note into a lane.
+        Dump <b>work requests</b> for a project (⌘/Ctrl-Enter), then <b>Plan</b> to turn that project&apos;s
+        pending requests into proposed tasks. Onboard a project in the <b>Context</b> tab first so Plan has
+        background to ground on.
       </p>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && dump()}
-        placeholder="A thought, a chat snippet, a request, whatever…"
+        placeholder="A request: 'fix the export bug', 'add CSV download', …"
         className="w-full min-h-[110px] p-3 bg-surface text-text border border-border-strong rounded-lg font-mono"
         autoFocus
       />
-      <div className="flex gap-2.5 mt-2.5 flex-wrap">
-        <input
-          value={hintVal}
-          onChange={(e) => setHintVal(e.target.value)}
-          placeholder="project hint (optional)"
-          className="flex-1 min-w-[160px] px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
-        />
-        <button className={actBtn} onClick={dump}>Dump</button>
-        <button className={`${ghost} inline-flex items-center gap-1`} onClick={distill}>
-          Distill all <ArrowRight className="h-3.5 w-3.5" />
+      <div className="flex gap-2.5 mt-2.5 flex-wrap items-center">
+        <select
+          value={project}
+          onChange={(e) => setProject(e.target.value)}
+          className="px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono min-w-[160px]"
+        >
+          {projects.length === 0 && <option value="">(no projects — onboard one)</option>}
+          {projects.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        <button className={`${actBtn} ${dis}`} onClick={dump} disabled={!project}>
+          Dump request
+        </button>
+        <button className={`${ghost} ${dis} inline-flex items-center gap-1`} onClick={planProject} disabled={!project}>
+          Plan {project}{pendingFor(project) > 0 ? ` (${pendingFor(project)})` : ""} <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
       <ul className="mt-4 space-y-2">
-        {entries.length === 0 && <li className="text-text-2">empty — drop your first thing above.</li>}
+        {entries.length === 0 && <li className="text-text-2">No requests yet — dump one above.</li>}
         {entries.map((e) => (
           <li key={e.id} className="p-3 border border-border rounded-lg bg-surface-2">
             {e.text}
             <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
-              <span className="px-2 rounded-full bg-border">{e.status}</span>
-              {e.lane && <span className="px-2 rounded-full bg-border">{e.lane.replace("_", " ")}</span>}
+              <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
+                {e.status === "raw" ? "pending" : e.status}
+              </span>
               {e.project_hint && <span className="px-2 rounded-full bg-border">{e.project_hint}</span>}
               <span>{new Date(e.created_at).toLocaleString()}</span>
-              <button className={ghost} onClick={() => route(e.id)}>route?</button>
-              <button className={`${danger} inline-flex items-center`} title="Delete note" onClick={() => del(e.id)}>
+              <button className={`${danger} inline-flex items-center`} title="Delete request" onClick={() => del(e.id)}>
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
@@ -268,12 +279,18 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
 
 function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
   const [keys, setKeys] = useState<string[]>([]);
+  const [projects, setProjects] = useState<string[]>([]);
+  const [obProject, setObProject] = useState("");
   const [sel, setSel] = useState<string | null>(null);
   const [md, setMd] = useState("");
-  const [obk, setObk] = useState("");
   const { push } = useToast();
 
-  const load = useCallback(async () => setKeys((await j("/api/context")).keys), []);
+  const load = useCallback(async () => {
+    setKeys((await j("/api/context")).keys);
+    const ps: string[] = (await j("/api/projects")).projects || [];
+    setProjects(ps);
+    setObProject((p) => p || ps[0] || "");
+  }, []);
   useEffect(() => {
     load();
   }, [load, rev]);
@@ -282,44 +299,51 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
     setSel(k);
     setMd((await j(`/api/context?key=${encodeURIComponent(k)}`)).md || "(empty)");
   };
-  const onboard = async () => {
-    if (!obk.trim()) return;
-    const r = await withBusy(`Auditing ${obk} (real Claude — 1-3 min)`, post("/api/onboard", { key: obk.trim() }));
-    if (r.ok) push({ variant: "success", title: `Onboarded ${r.key}`, description: `${r.chars} chars → CONTEXT` });
-    else push({ variant: "danger", title: "Onboard failed", description: r.note || r.error });
-    setObk("");
+  const audit = async (key: string, refresh = false) => {
+    if (!key) return;
+    const r = await withBusy(`${refresh ? "Auditing" : "Onboarding"} ${key} (real Claude — 1-3 min)`, post("/api/onboard", { key }));
+    if (r.ok) push({ variant: "success", title: `${refresh ? "Refreshed" : "Onboarded"} ${r.key}`, description: `${r.chars} chars of context` });
+    else push({ variant: "danger", title: "Audit failed", description: r.note || r.error });
     load();
+    if (sel === key) view(key);
   };
-  const plan = async (k: string) => {
-    const r = await withBusy(`Planning ${k} (real Claude)`, post("/api/plan", { key: k }));
-    push({ variant: "success", title: `Proposed ${(r.proposed || []).length} task(s) for ${k}`, description: "Review in the Proposed tab" });
-  };
+
+  const dis = "disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
     <section>
       <p className={hint}>
-        whale&apos;s living memory — one <b>CONTEXT.md</b> per project. Pick one to read, then <b>Plan this</b>.
-        <b> Onboard</b> audits a code project (read-only) into CONTEXT.
+        Per-project <b>background context</b>, built by a read-only <b>Onboard</b> (audit of the repo). It
+        <b> grounds Plan</b> — it&apos;s not where tasks live (those are requests in Inbox). <b>Audit</b> to refresh.
       </p>
-      <div className="flex gap-2.5 flex-wrap">
-        <input
-          value={obk}
-          onChange={(e) => setObk(e.target.value)}
-          placeholder="project key to onboard (e.g. arqtrack, whale)"
-          className="flex-1 min-w-[160px] px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
-        />
-        <button className={`${ghost} inline-flex items-center gap-1`} onClick={onboard}>
+      <div className="flex gap-2.5 flex-wrap items-center">
+        <select
+          value={obProject}
+          onChange={(e) => setObProject(e.target.value)}
+          className="px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono min-w-[160px]"
+        >
+          {projects.length === 0 && <option value="">(no krill projects)</option>}
+          {projects.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        <button className={`${actBtn} ${dis} inline-flex items-center gap-1`} onClick={() => audit(obProject)} disabled={!obProject}>
           Onboard <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
       {keys.length === 0 ? (
-        <p className="text-text-2 mt-4">No context yet. Dump things in Inbox, then Distill all.</p>
+        <p className="text-text-2 mt-4">No context yet. Onboard a project above to build its background.</p>
       ) : (
         <>
-          <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">projects</h3>
+          <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">onboarded projects</h3>
           <div className="flex gap-2 flex-wrap">
             {keys.map((k) => (
-              <button key={k} className={ghost} onClick={() => view(k)}>{k}</button>
+              <span key={k} className="inline-flex items-center border border-border rounded-lg bg-surface-2">
+                <button className="px-2.5 py-1.5 text-sm text-text hover:text-primary" onClick={() => view(k)}>{k}</button>
+                <button className="px-2 py-1.5 text-text-2 hover:text-text border-l border-border" title="Re-audit (refresh context)" onClick={() => audit(k, true)}>
+                  <RotateCw className="h-3.5 w-3.5" />
+                </button>
+              </span>
             ))}
           </div>
         </>
@@ -328,9 +352,7 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
         <div className="mt-4">
           <div className="flex items-center gap-2.5 mb-3">
             <b>{sel}</b>
-            <button className={`${actBtn} inline-flex items-center gap-1`} onClick={() => plan(sel)}>
-              Plan this <ArrowRight className="h-3.5 w-3.5" />
-            </button>
+            <span className="text-xs text-text-2">background context — Plan it from the Inbox tab</span>
           </div>
           <pre className="whitespace-pre-wrap bg-surface-2 border border-border rounded-lg p-3.5 font-mono text-sm">{md}</pre>
         </div>

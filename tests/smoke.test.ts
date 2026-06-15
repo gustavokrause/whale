@@ -11,9 +11,9 @@ import { inboxEntries, proposedTasks, config as configTable } from "../src/db/sc
 import {
   addEntry, listEntries, rawEntries, markEntries,
   addProposed, listProposed, updateProposed, getProposed,
-  readConfig, writeConfig,
+  readConfig, writeConfig, pendingRequests,
 } from "../src/db/queries";
-import { triage, flowPreview } from "../src/lib/stages";
+import { triage, flowPreview, plan } from "../src/lib/stages";
 import { push, pushBatch, refine } from "../src/lib/pipeline";
 
 function resetDb() {
@@ -51,6 +51,17 @@ test("db inbox + proposed round-trip", () => {
   assert.equal(listProposed("approved").length, 1);
 
   assert.throws(() => addEntry({ text: "   " }), "empty entry rejected");
+});
+
+test("plan: pending requests become proposed tasks, then marked planned", async () => {
+  resetDb();
+  addEntry({ text: "add CSV export to reports", projectHint: "ztest" });
+  assert.equal(pendingRequests("ztest").length, 1, "dump is a pending request");
+  const proposed = await plan(stubTeam as never, "ztest");
+  assert.equal(proposed.length, 1, "one request -> one proposed task");
+  assert.match(proposed[0].name, /CSV export/, "task carries the request");
+  assert.equal(pendingRequests("ztest").length, 0, "request consumed (planned)");
+  resetDb();
 });
 
 test("triage classifies risk correctly", () => {

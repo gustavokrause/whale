@@ -2,9 +2,9 @@
 // real path that uses the persona prompts loaded from ai-team.
 
 import { isReal, config } from "./config";
-import { complete, completeJSON } from "./runner";
-import { readContext, writeContext } from "./context-store";
-import { rawEntries, markEntries, addProposed } from "@/db/queries";
+import { completeJSON } from "./runner";
+import { readContext } from "./context-store";
+import { pendingRequests, markEntries, addProposed } from "@/db/queries";
 import type { Team, Persona } from "./persona-loader";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
@@ -39,92 +39,46 @@ export type RouteResult = {
   reason: string;
 };
 
-/* ---------- DISTILLER: raw inbox entries -> living CONTEXT.md per key ---------- */
-
-export async function distill(team: Team) {
-  const entries = rawEntries();
-  if (!entries.length) return { distilled: 0, keys: [] as { key: string; added: number }[] };
-
-  const byKey = new Map<string, InboxEntry[]>();
-  for (const e of entries) {
-    const key = (e.project_hint || "").trim() || "global";
-    if (!byKey.has(key)) byKey.set(key, []);
-    byKey.get(key)!.push(e);
-  }
-
-  const touched: { key: string; added: number }[] = [];
-  for (const [key, group] of byKey) {
-    const prior = readContext(key);
-    const md = isReal() ? await distillReal(team, key, prior, group) : distillStub(key, prior, group);
-    writeContext(key, md);
-    markEntries(group.map((e) => e.id), "distilled");
-    touched.push({ key, added: group.length });
-  }
-  return { distilled: entries.length, keys: touched };
-}
-
-function distillStub(key: string, prior: string, group: InboxEntry[]): string {
-  const header = prior.trim()
-    ? prior.trimEnd()
-    : `# CONTEXT — ${key}\n\n_Living file maintained by whale._\n\n## Notes`;
-  const bullets = group
-    .map((e) => `- ${e.text.replace(/\n+/g, " ")}  _(${new Date(e.created_at).toISOString().slice(0, 10)})_`)
-    .join("\n");
-  return `${header}\n${bullets}\n`;
-}
-
-async function distillReal(team: Team, key: string, prior: string, group: InboxEntry[]): Promise<string> {
-  const caio = persona(team, "Caio");
-  const system =
-    `${caio?.systemPrompt || ""}\n\nYou maintain a living CONTEXT.md for project "${key}". ` +
-    `Merge new notes into a structured doc with sections: Goals, Work requested, Constraints, ` +
-    `Decisions, Open questions.\n` +
-    `Classify precisely: a concrete request ("remove X", "add Y", "fix Z") is **Work requested** ` +
-    `(an actionable item), NOT an Open question. Open questions are only genuine unknowns. Capture ` +
-    `the user's intent faithfully; don't invent scope. Keep it tight; preserve prior decisions.\n\n` +
-    `OUTPUT CONTRACT: return ONLY the raw markdown of the file, starting with the line ` +
-    `"# CONTEXT — ${key}". No preamble, no summary of what you changed, no code fences, no commentary.`;
-  const user =
-    `EXISTING CONTEXT.md:\n${prior || "(none yet)"}\n\nNEW NOTES TO MERGE IN:\n` +
-    group.map((e) => `- ${e.text}`).join("\n") +
-    `\n\nNow output the complete updated CONTEXT.md and nothing else.`;
-  return complete({ system, user, model: config.models.distill });
-}
-
-/* ---------- PLANNER: CONTEXT -> proposed tasks (Augusto + Maria) ---------- */
+/* ---------- PLANNER: pending requests (grounded by audit context) -> proposed ---------- */
+// A dump tagged to a project IS a work request (an inbox_entries row). Plan reads
+// the project's pending requests + the audit CONTEXT (background reference, never
+// rewritten) → proposed tasks, then marks those requests planned. No distill step.
 
 export async function plan(team: Team, key: string): Promise<ProposedTask[]> {
-  const context = readContext(key);
-  if (!context.trim()) return [];
-  const tasks = isReal() ? await planReal(team, key, context) : planStub(key, context);
-  return tasks.map((t) => triageAndStore(team, key, t));
+  const reqs = pendingRequests(key);
+  if (!reqs.length) return [];
+  const context = readContext(key); // background reference (may be empty if not onboarded)
+  const drafts = isReal() ? await planReal(team, key, context, reqs) : planStub(key, reqs);
+  const proposed = drafts.map((t) => triageAndStore(team, key, t));
+  markEntries(reqs.map((r) => r.id), "planned");
+  return proposed;
 }
 
-function planStub(key: string, context: string): TaskDraft[] {
-  const lines = context
-    .split("\n")
-    .map((l) => l.replace(/^[-*]\s*/, "").replace(/_\(.*?\)_/g, "").trim())
-    .filter((l) => l && !l.startsWith("#") && !l.startsWith("_") && l.length > 8);
-  return lines.slice(0, 3).map((l) => ({
-    name: l.length > 70 ? l.slice(0, 67) + "..." : l,
-    description: `From ${key} context: ${l}`,
-  }));
+function planStub(key: string, reqs: InboxEntry[]): TaskDraft[] {
+  return reqs.map((r) => {
+    const t = r.text.replace(/\n+/g, " ").trim();
+    return { name: t.length > 70 ? t.slice(0, 67) + "..." : t, description: `Requested for ${key}.` };
+  });
 }
 
-async function planReal(team: Team, key: string, context: string): Promise<TaskDraft[]> {
+async function planReal(team: Team, key: string, context: string, reqs: InboxEntry[]): Promise<TaskDraft[]> {
   const augusto = persona(team, "Augusto");
   const maria = persona(team, "Maria");
   const system =
     `You are a planning duo.\n\n# Augusto (Strategy)\n${augusto?.systemPrompt || ""}\n\n` +
     `# Maria (Product)\n${maria?.systemPrompt || ""}\n\n` +
     `Augusto challenges scope and protects resources; Maria turns it into the smallest shippable tasks.\n` +
-    `Plan STRICTLY from the CONTEXT below — only what it states or directly implies. Do NOT invent ` +
-    `scope, do NOT assume facts not present, do NOT propose codebase audits. Augusto kills scope creep. ` +
-    `If the context is too thin to justify any task, return []. ` +
+    `Turn the WORK REQUESTS into concrete proposed tasks, grounded in the PROJECT CONTEXT ` +
+    `(background reference — use it to scope and clarify; do NOT restate it and do NOT invent work ` +
+    `beyond the requests). Augusto kills scope creep. ` +
     `Sequence work that builds on other tasks: set depends_on to the exact names of ` +
     `the sibling tasks that must finish first ([] if independent). ` +
     `Each task: {name, description, priority(P0..P3), mode(dev|non-dev), depends_on: string[]}.`;
-  const user = `PROJECT: ${key}\n\nCONTEXT:\n${context}\n\nReturn a JSON array of proposed tasks (max 6, fewer is better).`;
+  const user =
+    `PROJECT: ${key}\n\n` +
+    `PROJECT CONTEXT (background, reference only):\n${context || "(not onboarded — no background context)"}\n\n` +
+    `WORK REQUESTS:\n${reqs.map((r) => `- ${r.text}`).join("\n")}\n\n` +
+    `Return a JSON array of proposed tasks (one or more per request as needed).`;
   const out = await completeJSON<TaskDraft[] | { tasks: TaskDraft[] }>({ system, user, model: config.models.plan });
   return Array.isArray(out) ? out : out.tasks || [];
 }

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { eq, asc, desc } from "drizzle-orm";
 import { db } from "./client";
 import { broadcast } from "@/lib/events";
+import { keyToSlug } from "@/lib/context-store";
 import {
   inboxEntries,
   proposedTasks,
@@ -43,6 +44,12 @@ export const listEntries = (limit = 50): InboxEntry[] =>
 
 export const rawEntries = (): InboxEntry[] =>
   db.select().from(inboxEntries).where(eq(inboxEntries.status, "raw")).orderBy(asc(inboxEntries.created_at)).all();
+
+/** Pending (un-planned) requests tagged to a project — the dumps Plan consumes. */
+export const pendingRequests = (key: string): InboxEntry[] => {
+  const want = keyToSlug(key);
+  return rawEntries().filter((e) => keyToSlug(e.project_hint || "global") === want);
+};
 
 export function markEntries(ids: string[], status: string) {
   for (const id of ids)
