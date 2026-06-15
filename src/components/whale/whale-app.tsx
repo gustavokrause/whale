@@ -105,10 +105,20 @@ export function WhaleApp() {
       </nav>
 
       <main className="max-w-3xl mx-auto p-5">
-        {tab === "inbox" && <InboxTab withBusy={withBusy} onChange={loadStatus} />}
-        {tab === "context" && <ContextTab withBusy={withBusy} />}
-        {tab === "proposed" && <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} />}
-        {tab === "settings" && <SettingsTab withBusy={withBusy} onSaved={loadStatus} />}
+        {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
+            switch, like the original display:none UI. Polling is gated by `active`. */}
+        <div hidden={tab !== "inbox"}>
+          <InboxTab withBusy={withBusy} onChange={loadStatus} active={tab === "inbox"} />
+        </div>
+        <div hidden={tab !== "context"}>
+          <ContextTab withBusy={withBusy} />
+        </div>
+        <div hidden={tab !== "proposed"}>
+          <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} />
+        </div>
+        <div hidden={tab !== "settings"}>
+          <SettingsTab withBusy={withBusy} onSaved={loadStatus} />
+        </div>
       </main>
 
       <style>{`@keyframes ind{0%{left:-30%}100%{left:100%}}`}</style>
@@ -124,7 +134,7 @@ const actBtn = `${btn} bg-success text-white`;
 const ghost = `${btn} bg-surface-2 text-text border border-border`;
 const danger = `${btn} bg-danger/10 text-danger border border-danger/40`;
 
-function InboxTab({ withBusy, onChange }: { withBusy: Busy; onChange: () => void }) {
+function InboxTab({ withBusy, onChange, active }: { withBusy: Busy; onChange: () => void; active: boolean }) {
   const [entries, setEntries] = useState<InboxEntry[]>([]);
   const [text, setText] = useState("");
   const [hintVal, setHintVal] = useState("");
@@ -132,9 +142,9 @@ function InboxTab({ withBusy, onChange }: { withBusy: Busy; onChange: () => void
   const load = useCallback(async () => setEntries((await j("/api/inbox")).entries), []);
   useEffect(() => {
     load();
-    const id = setInterval(() => !document.hidden && load(), 5000);
+    const id = setInterval(() => active && !document.hidden && load(), 5000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, active]);
 
   const dump = async () => {
     if (!text.trim()) return;
