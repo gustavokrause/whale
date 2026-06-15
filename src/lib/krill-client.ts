@@ -96,3 +96,13 @@ export async function createTask(args: CreateTaskArgs) {
 export async function patchTask(id: string, fields: Record<string, unknown>) {
   return call("PATCH", `/api/tasks/${id}`, fields);
 }
+
+/** Fetch a krill task (for status sync-back). Tolerant: null if missing/unreachable. */
+export async function getTask(id: string): Promise<{ status?: string } | null> {
+  try {
+    const r = await call("GET", `/api/tasks/${id}`);
+    return r?.task || r || null;
+  } catch {
+    return null;
+  }
+}

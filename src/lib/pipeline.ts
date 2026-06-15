@@ -194,6 +194,28 @@ export async function refine(team: Team, id: string, input: string) {
 
 export const previewFlow = flowPreview;
 
+export type EnrichedProposed = ProposedTask & { krill_status?: string | null };
+
+/**
+ * Gap A — krill→whale status sync. whale is otherwise fire-and-forget; this reads
+ * back the live krill task status for pushed tasks so the Proposed tab isn't stale
+ * (e.g. a task that's already DONE in krill). Read-only, over HTTP. No-op if krill
+ * is unreachable.
+ */
+export async function enrichPushed(items: ProposedTask[]): Promise<EnrichedProposed[]> {
+  if (!(await krill.ping())) return items;
+  const out: EnrichedProposed[] = [];
+  for (const t of items) {
+    if (t.krill_task_id && (t.status === "pushed" || t.status === "push_failed")) {
+      const kt = await krill.getTask(t.krill_task_id);
+      out.push({ ...t, krill_status: kt?.status ?? null });
+    } else {
+      out.push(t);
+    }
+  }
+  return out;
+}
+
 /** Push an approved task to krill. High-risk tasks are never silently bypassed. */
 export async function push(id: string, { confirm = false }: { confirm?: boolean } = {}) {
   const t = getProposed(id);

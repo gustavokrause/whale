@@ -283,12 +283,15 @@ function ContextTab({ withBusy }: { withBusy: Busy }) {
   );
 }
 
+type EnrichedTask = ProposedTask & { krill_status?: string | null };
+
 function ProposedTab({ withBusy, onChange, active }: { withBusy: Busy; onChange: () => void; active: boolean }) {
-  const [items, setItems] = useState<ProposedTask[]>([]);
+  const [items, setItems] = useState<EnrichedTask[]>([]);
   const [showRej, setShowRej] = useState(false);
   const [batchKey, setBatchKey] = useState("");
 
-  const load = useCallback(async () => setItems((await j("/api/proposed")).proposed), []);
+  // ?sync=1 reads back live krill status for pushed tasks (Gap A — no more stale rows)
+  const load = useCallback(async () => setItems((await j("/api/proposed?sync=1")).proposed), []);
   useEffect(() => {
     load();
     const id = setInterval(() => active && !document.hidden && load(), 5000);
@@ -380,6 +383,19 @@ function ProposedTab({ withBusy, onChange, active }: { withBusy: Busy; onChange:
                 <span className="px-2 rounded-full bg-border">{p.status}</span>
                 <span className="px-2 rounded-full bg-border">{p.project_key}</span>
                 <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
+                {p.status === "pushed" && p.krill_status && (
+                  <span
+                    className={`px-2 rounded-full ${
+                      p.krill_status === "DONE"
+                        ? "bg-success/20 text-success"
+                        : p.krill_status === "CANCELED"
+                          ? "bg-muted/20 text-muted"
+                          : "bg-info/20 text-info"
+                    }`}
+                  >
+                    krill: {p.krill_status}
+                  </span>
+                )}
               </div>
               <div className="text-xs text-text-2 mt-1">
                 {p.rationale}
