@@ -303,6 +303,7 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
 function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
   const [keys, setKeys] = useState<string[]>([]);
   const [obk, setObk] = useState("");
+  const [seedMd, setSeedMd] = useState("");
   const [sel, setSel] = useState<string | null>(null);
   const [md, setMd] = useState("");
   const { push } = useToast();
@@ -324,29 +325,50 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
     load();
     if (sel === key) view(key);
   };
+  const onboardOrSeed = async () => {
+    const key = obk.trim();
+    if (!key) return;
+    if (seedMd.trim()) {
+      const r = await withBusy(`Seeding ${key}`, post("/api/context", { key, md: seedMd }));
+      if (r.ok) push({ variant: "success", title: `Seeded ${key}`, description: `${r.chars} chars of context` });
+      else push({ variant: "danger", title: "Seed failed", description: r.error });
+      load();
+      if (sel === key) view(key);
+    } else {
+      await audit(key);
+    }
+    setObk("");
+    setSeedMd("");
+  };
 
   const dis = "disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
     <section>
       <p className={hint}>
-        Per-project <b>background context</b>, built by a read-only <b>Onboard</b> (audit of the repo). It
-        <b> grounds Plan</b> — it&apos;s not where tasks live (those are requests in Inbox). <b>Audit</b> to refresh.
+        Per-project <b>background context</b>. <b>Onboard</b> = read-only audit of the repo; or <b>paste</b> context
+        to seed it by hand (idea projects with no repo). It <b>grounds Plan</b> — it&apos;s not where tasks live
+        (those are requests in Inbox). <b>Audit ↻</b> re-runs the repo audit.
       </p>
-      <div className="flex gap-2.5 flex-wrap items-center">
+      <div className="space-y-2.5">
         <input
           value={obk}
           onChange={(e) => setObk(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && obk.trim() && (audit(obk.trim()), setObk(""))}
-          placeholder="project key to onboard (e.g. arqtrack, krill)"
-          className="flex-1 min-w-[160px] px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
+          placeholder="project key (e.g. arqtrack, krill)"
+          className="w-full px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
+        />
+        <textarea
+          value={seedMd}
+          onChange={(e) => setSeedMd(e.target.value)}
+          placeholder="optional: paste background context to seed by hand (e.g. an idea project with no repo). Leave empty to audit the repo via krill."
+          className="w-full min-h-[90px] p-3 bg-surface text-text border border-border-strong rounded-lg font-mono text-sm"
         />
         <button
           className={`${actBtn} ${dis} inline-flex items-center gap-1`}
-          onClick={() => obk.trim() && (audit(obk.trim()), setObk(""))}
+          onClick={onboardOrSeed}
           disabled={!obk.trim()}
         >
-          Onboard <ArrowRight className="h-3.5 w-3.5" />
+          {seedMd.trim() ? "Seed context" : "Onboard (audit repo)"} <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
       {keys.length === 0 ? (
