@@ -205,10 +205,10 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
     load();
     onChange();
   };
-  const planProject = async () => {
-    if (!project) return;
-    const r = await withBusy(`Planning ${project} (real Claude)`, post("/api/plan", { key: project }));
-    push({ variant: "success", title: `Proposed ${(r.proposed || []).length} task(s) for ${project}`, description: "Review in the Proposed tab" });
+  const planProject = async (key: string) => {
+    if (!key) return;
+    const r = await withBusy(`Planning ${key} (real Claude)`, post("/api/plan", { key }));
+    push({ variant: "success", title: `Proposed ${(r.proposed || []).length} task(s) for ${key}`, description: "Review in the Proposed tab" });
     load();
     onChange();
   };
@@ -219,7 +219,13 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
     onChange();
   };
 
-  const pendingFor = (p: string) => entries.filter((e) => (e.project_hint || "") === p && e.status === "raw").length;
+  const grouped = entries.reduce<Record<string, InboxEntry[]>>((acc, e) => {
+    const k = e.project_hint || "(unassigned)";
+    (acc[k] ||= []).push(e);
+    return acc;
+  }, {});
+  const groupKeys = Object.keys(grouped).sort();
+  const pendingIn = (list: InboxEntry[]) => list.filter((e) => e.status === "raw").length;
   const dis = "disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
@@ -252,37 +258,44 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
           Dump request
         </button>
       </div>
-      <ul className="mt-4 space-y-2">
-        {entries.length === 0 && <li className="text-text-2">No requests yet — dump one above.</li>}
-        {entries.map((e) => (
-          <li key={e.id} className="p-3 border border-border rounded-lg bg-surface-2">
-            {e.text}
-            <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
-              <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
-                {e.status === "raw" ? "pending" : e.status}
+      {entries.length === 0 ? (
+        <p className="text-text-2 mt-4">No requests yet — dump one above.</p>
+      ) : (
+        groupKeys.map((p) => (
+          <div key={p} className="mt-4 border border-border rounded-lg overflow-hidden">
+            {/* per-project group: requests + its own Plan (acts on this project's pending) */}
+            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-surface-2 border-b border-border">
+              <span className="text-sm">
+                <b>{p}</b> <span className="text-text-2">· {pendingIn(grouped[p])} pending</span>
               </span>
-              {e.project_hint && <span className="px-2 rounded-full bg-border">{e.project_hint}</span>}
-              <span>{new Date(e.created_at).toLocaleString()}</span>
-              <button className={`${danger} inline-flex items-center`} title="Delete request" onClick={() => del(e.id)}>
-                <Trash2 className="h-4 w-4" />
+              <button
+                className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
+                onClick={() => planProject(p)}
+                disabled={pendingIn(grouped[p]) === 0}
+                title={`Plan all pending requests for ${p}`}
+              >
+                Plan <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </div>
-          </li>
-        ))}
-      </ul>
-      {/* Plan acts on ALL pending requests for the selected project — kept apart from the dump form. */}
-      <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
-        <span className="text-xs text-text-2">
-          <b>{pendingFor(project)}</b> pending request{pendingFor(project) === 1 ? "" : "s"} for <b>{project || "—"}</b>
-        </span>
-        <button
-          className={`${actBtn} ${dis} inline-flex items-center gap-1`}
-          onClick={planProject}
-          disabled={!project || pendingFor(project) === 0}
-        >
-          Plan {project} <ArrowRight className="h-3.5 w-3.5" />
-        </button>
-      </div>
+            <ul className="divide-y divide-border">
+              {grouped[p].map((e) => (
+                <li key={e.id} className="px-3 py-2.5">
+                  {e.text}
+                  <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
+                    <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
+                      {e.status === "raw" ? "pending" : e.status}
+                    </span>
+                    <span>{new Date(e.created_at).toLocaleString()}</span>
+                    <button className={`${danger} inline-flex items-center !px-2 !py-1`} title="Delete request" onClick={() => del(e.id)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      )}
     </section>
   );
 }
