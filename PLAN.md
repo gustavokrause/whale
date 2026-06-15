@@ -1,5 +1,13 @@
 # whale — build plan
 
+> **Status (2026-06): Phases 0–4 shipped.** This file is the original build plan
+> and remains accurate for the core architecture (capture → distill → plan →
+> triage → route → push, personas, boundaries). The later **autonomy + execution
+> work — A1–A3 (krill) and B0–B5 (whale): autonomy ladder, batch/deps, refine loop,
+> onboarding, auto-finish, circuit breaker — is superseded by
+> [`../bridge/CLOSING-THE-CYCLE.md`](../bridge/CLOSING-THE-CYCLE.md)**, the source
+> of truth for what's built. Read that for current behavior.
+
 > The strategy brain on top of krill. You dump anything; whale captures it,
 > distills it into living context, plans work with the AI team, triages what
 > needs your eyes vs. what bypasses, and drives krill to execute.

@@ -1,6 +1,6 @@
 # 🐋 whale
 
-The strategy brain on top of [krill](../ai-auto-worflow). You dump anything;
+The strategy brain on top of [krill](../krill). You dump anything;
 whale captures it, distills it into living context, plans work with the
 [ai-team](../ai-team) personas, triages what needs your review vs. what
 bypasses, and drives krill to execute.
@@ -52,33 +52,54 @@ Triage is **deterministic** — it reads the safe-words + risk tiers straight fr
 `AGENTS.md`, so "payment + migration" → 🔴 review and "fix typo" → 🟢 bypass with
 no LLM needed.
 
+Beyond the core flow, the pipeline also does:
+- **Onboarding (B5)** — audit a code project read-only (`POST /api/onboard`) or
+  seed an idea project by hand → its living CONTEXT.md. Awareness, not autonomy.
+- **Batch handoff (B2)** — push a project's approved tasks in dependency order,
+  wiring krill `depends_on` from the sibling name→id map.
+- **Refine loop (B3)** — Approve / Decline / **Input**; Input re-evaluates one task
+  (Maria) and re-triages, repeatable until you approve.
+- **Flow preview** — each proposed task shows where it stops in krill (🔴 full
+  review · 🟡 skips plan review · 🟢 auto-finish → DONE).
+- **Arm-time double-confirm (B4)** — pushing a batch that will auto-finish requires
+  an explicit second confirm.
+
 ## Going real
 
-Default runner is `stub` (deterministic — the whole spine runs offline).
-Flip to persona-driven Claude. whale mirrors krill: it spawns the **Claude Code
-CLI** (`claude`), using your existing Claude Code auth — **no API key, no
-separate billing**.
+The repo default runner is `stub` (deterministic — the whole spine runs offline).
+The fleet runs **real** via `.env` (`WHALE_RUNNER=real`); flip it yourself with:
 
 ```bash
 WHALE_RUNNER=real npm start            # requires the `claude` CLI installed + authed
 ```
 
-Distiller/planner/router then run real Claude (Haiku/Sonnet); triage stays
-deterministic. Set `CLAUDE_BIN` if `claude` isn't on PATH.
+whale mirrors krill: it spawns the **Claude Code CLI** (`claude`) on your existing
+Claude Code auth — **no API key, no separate billing**. Distiller/planner/router/
+audit/refine then run real Claude (Haiku for distill+route, Sonnet for plan+refine);
+triage stays deterministic. Set `CLAUDE_BIN` if `claude` isn't on PATH.
 
-Dials (env): `WHALE_BYPASS=conservative|balanced|aggressive`,
-`WHALE_AUTOPUSH=1`, `WHALE_ALLOW_NEW_PROJECTS=1`, `KRILL_URL`, `PERSONAS_DIR`.
+### Autonomy ladder (B1)
 
-## Status — all phases (stub-runnable)
+The `WHALE_BYPASS` dial sets how far a task runs before it reaches you:
 
-- [x] Phase 0 — persona-loader (sync foundation)
-- [x] Phase 1 — capture inbox + distiller + planner
-- [x] Phase 2 — triage (risk → krill skip flags) + krill HTTP push
-- [x] Phase 3 — request router (task / new_project / context / ask)
-- [x] Phase 4 — gates (new-project always human) + autonomy dials
+| Dial | low risk | medium | high / self-edit |
+|---|---|---|---|
+| `conservative` (default) | review | review | review |
+| `balanced` | skip plan review | review | review |
+| `aggressive` | skip plan review **+ auto_publish** | skip plan review | review |
 
-### Hardening left (real-mode)
+- **auto-finish** (low + aggressive) sets krill `auto_publish`; krill only honors it
+  when the project also has `allow_auto_finish=true` (double-gated, AI review stays on).
+- **Self-edit guard** (`WHALE_PROTECTED`, default `whale,krill`): tasks targeting the
+  orchestrator itself are **always 🔴, never bypass**, any dial.
 
-- Verify krill `POST /api/tasks` accepts `skip_*` + `priority` on create (else PATCH after).
-- Real planner/distiller quality pass once a key is wired (stub is heuristic).
-- `node:sqlite` is experimental (Node 22) — pin or swap if it churns.
+Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PROJECTS=1`
+(propose new projects — creation stays human-gated), `KRILL_URL`, `PERSONAS_DIR`.
+
+## Status
+
+All phases shipped and tested (10/10 smoke). The autonomy + execution work
+(A1–A3 in krill, B0–B5 in whale) is tracked in
+[`../bridge/CLOSING-THE-CYCLE.md`](../bridge/CLOSING-THE-CYCLE.md) — the source of
+truth for what's built. `node:sqlite` is experimental (Node 22) — pin or swap if it
+churns.
