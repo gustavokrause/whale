@@ -19,7 +19,7 @@ export const inboxEntries = sqliteTable(
     text: text("text").notNull(),
     source: text("source").notNull().default("manual"),
     project_hint: text("project_hint"),
-    status: text("status").notNull().default("raw"), // raw | distilled
+    status: text("status").notNull().default("raw"), // raw (pending) | planned
     lane: text("lane"), // router: task | context | new_project | ask
     created_at: integer("created_at").notNull(),
   },
@@ -55,7 +55,6 @@ export const proposedTasks = sqliteTable(
 export const config = sqliteTable("config", {
   id: integer("id").primaryKey(),
   runner: text("runner"),
-  model_distill: text("model_distill"),
   model_plan: text("model_plan"),
   model_route: text("model_route"),
   bypass: text("bypass"),

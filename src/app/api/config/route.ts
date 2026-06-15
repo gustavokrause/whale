@@ -19,7 +19,7 @@ function validateConfigPatch(b: Record<string, unknown>) {
     if (!RUNNERS.includes(b.runner as string)) throw new Error("runner must be stub|real");
     out.runner = b.runner;
   }
-  for (const k of ["model_distill", "model_plan", "model_route"]) {
+  for (const k of ["model_plan", "model_route"]) {
     if (k in b) {
       if (!MODELS.includes(b[k] as string)) throw new Error(`${k} must be ${MODELS.join("|")}`);
       out[k] = b[k];

@@ -146,7 +146,7 @@ export const deleteProposed = (id: string) => {
 /* ---- runtime config (UI-overridable subset; see lib/config.ts) ---- */
 
 export const CONFIG_FIELDS = [
-  "runner", "model_distill", "model_plan", "model_route",
+  "runner", "model_plan", "model_route",
   "bypass", "auto_push", "allow_new_projects",
 ] as const;
 

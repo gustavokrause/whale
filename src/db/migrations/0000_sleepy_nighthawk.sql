@@ -1,7 +1,6 @@
 CREATE TABLE `config` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`runner` text,
-	`model_distill` text,
 	`model_plan` text,
 	`model_route` text,
 	`bypass` text,

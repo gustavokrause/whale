@@ -12,7 +12,6 @@ import type { ConfigRow } from "@/db/schema";
 
 const envDefaults = {
   runner: process.env.WHALE_RUNNER || "stub",
-  model_distill: process.env.WHALE_MODEL_DISTILL || "haiku",
   model_plan: process.env.WHALE_MODEL_PLAN || "sonnet",
   model_route: process.env.WHALE_MODEL_ROUTE || "haiku",
   bypass: process.env.WHALE_BYPASS || "conservative",
@@ -54,9 +53,6 @@ export const config = {
     return pick("runner") as string;
   },
   models: {
-    get distill() {
-      return pick("model_distill") as string;
-    },
     get plan() {
       return pick("model_plan") as string;
     },
@@ -88,7 +84,6 @@ export function configSnapshot() {
   return {
     runner: config.runner,
     models: {
-      distill: config.models.distill,
       plan: config.models.plan,
       route: config.models.route,
     },

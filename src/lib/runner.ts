@@ -77,12 +77,7 @@ function runClaude({
   });
 }
 
-/** Sandboxed text generation (no tools) — distill / plan / route. */
-export function complete({ system, user, model }: RunArgs): Promise<string> {
-  return runClaude({ system, user, model });
-}
-
-/** Sandboxed, returns parsed JSON. */
+/** Sandboxed, returns parsed JSON — plan / route / refine. */
 export async function completeJSON<T = unknown>({ system, user, model }: RunArgs): Promise<T> {
   const text = await runClaude({
     system,

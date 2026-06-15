@@ -16,7 +16,7 @@ type Status = {
 
 type ConfigSnap = {
   runner: string;
-  models: { distill: string; plan: string; route: string };
+  models: { plan: string; route: string };
   autonomy: { bypass: string; autoPush: boolean; allowNewProjects: boolean };
   envLocked: { protected: string[]; krillUrl: string; personasDir: string };
 };
@@ -225,15 +225,15 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
   return (
     <section>
       <p className={hint}>
-        Dump <b>work requests</b> for a project (⌘/Ctrl-Enter), then <b>Plan</b> to turn that project&apos;s
-        pending requests into proposed tasks. Onboard a project in the <b>Context</b> tab first so Plan has
-        background to ground on.
+        Dump <b>work requests</b> for a project (⌘/Ctrl-Enter) — each is queued as <i>pending</i>. Then
+        <b> Plan</b> (below) turns <b>all</b> of a project&apos;s pending requests into proposed tasks, grounded
+        by its Context. Onboard a project in the <b>Context</b> tab first.
       </p>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && dump()}
-        placeholder="A request: 'fix the export bug', 'add CSV download', …"
+        placeholder="A thought, a chat snippet, a request, whatever…"
         className="w-full min-h-[110px] p-3 bg-surface text-text border border-border-strong rounded-lg font-mono"
         autoFocus
       />
@@ -250,9 +250,6 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
         </select>
         <button className={`${actBtn} ${dis}`} onClick={dump} disabled={!project}>
           Dump request
-        </button>
-        <button className={`${ghost} ${dis} inline-flex items-center gap-1`} onClick={planProject} disabled={!project}>
-          Plan {project}{pendingFor(project) > 0 ? ` (${pendingFor(project)})` : ""} <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
       <ul className="mt-4 space-y-2">
@@ -273,24 +270,31 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
           </li>
         ))}
       </ul>
+      {/* Plan acts on ALL pending requests for the selected project — kept apart from the dump form. */}
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
+        <span className="text-xs text-text-2">
+          <b>{pendingFor(project)}</b> pending request{pendingFor(project) === 1 ? "" : "s"} for <b>{project || "—"}</b>
+        </span>
+        <button
+          className={`${actBtn} ${dis} inline-flex items-center gap-1`}
+          onClick={planProject}
+          disabled={!project || pendingFor(project) === 0}
+        >
+          Plan {project} <ArrowRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </section>
   );
 }
 
 function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
   const [keys, setKeys] = useState<string[]>([]);
-  const [projects, setProjects] = useState<string[]>([]);
-  const [obProject, setObProject] = useState("");
+  const [obk, setObk] = useState("");
   const [sel, setSel] = useState<string | null>(null);
   const [md, setMd] = useState("");
   const { push } = useToast();
 
-  const load = useCallback(async () => {
-    setKeys((await j("/api/context")).keys);
-    const ps: string[] = (await j("/api/projects")).projects || [];
-    setProjects(ps);
-    setObProject((p) => p || ps[0] || "");
-  }, []);
+  const load = useCallback(async () => setKeys((await j("/api/context")).keys), []);
   useEffect(() => {
     load();
   }, [load, rev]);
@@ -317,17 +321,18 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
         <b> grounds Plan</b> — it&apos;s not where tasks live (those are requests in Inbox). <b>Audit</b> to refresh.
       </p>
       <div className="flex gap-2.5 flex-wrap items-center">
-        <select
-          value={obProject}
-          onChange={(e) => setObProject(e.target.value)}
-          className="px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono min-w-[160px]"
+        <input
+          value={obk}
+          onChange={(e) => setObk(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && obk.trim() && (audit(obk.trim()), setObk(""))}
+          placeholder="project key to onboard (e.g. arqtrack, krill)"
+          className="flex-1 min-w-[160px] px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
+        />
+        <button
+          className={`${actBtn} ${dis} inline-flex items-center gap-1`}
+          onClick={() => obk.trim() && (audit(obk.trim()), setObk(""))}
+          disabled={!obk.trim()}
         >
-          {projects.length === 0 && <option value="">(no krill projects)</option>}
-          {projects.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
-        <button className={`${actBtn} ${dis} inline-flex items-center gap-1`} onClick={() => audit(obProject)} disabled={!obProject}>
           Onboard <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -448,7 +453,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
         </p>
       )}
       {show.length === 0 ? (
-        <p className="text-text-2 mt-4">Nothing to review. Distill, then Plan a project in the Context tab.</p>
+        <p className="text-text-2 mt-4">Nothing to review yet — dump requests and <b>Plan</b> a project in the Inbox tab.</p>
       ) : (
         <ul className="mt-4 space-y-2">
           {show.map((p) => (
@@ -555,7 +560,7 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
       </select>
       <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">models</h3>
       <div className="flex gap-2 flex-wrap items-center">
-        {(["distill", "plan", "route"] as const).map((m) => (
+        {(["plan", "route"] as const).map((m) => (
           <label key={m} className="flex items-center gap-1.5">
             {m}
             <select className={sel} value={c.models[m]} onChange={(e) => save({ [`model_${m}`]: e.target.value })}>

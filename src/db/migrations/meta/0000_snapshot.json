@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c08ef332-2c52-4d94-a787-9c1c9004476a",
+  "id": "789a67cc-cc48-4cb6-a74d-3fec644f6746",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "config": {
@@ -16,13 +16,6 @@
         },
         "runner": {
           "name": "runner",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "model_distill": {
-          "name": "model_distill",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

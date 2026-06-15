@@ -1,9 +1,9 @@
 # 🐋 whale
 
-The strategy brain on top of [krill](../krill). You dump anything;
-whale captures it, distills it into living context, plans work with the
-[ai-team](../ai-team) personas, triages what needs your review vs. what
-bypasses, and drives krill to execute.
+The strategy brain on top of [krill](../krill). You dump **work requests** per
+project; whale plans them with the [ai-team](../ai-team) personas — grounded in
+each project's living **context** (built by onboarding) — triages what needs your
+review vs. what bypasses, and drives krill to execute.
 
 > Krill feeds the whale. Krill runs tasks → PRs; whale decides which tasks
 > exist, why, and who reviews them.
@@ -32,20 +32,19 @@ npm start                 # http://localhost:4100  (LAN URL printed for phone)
 Tabs: **Inbox** (dump anything) · **Context** (living CONTEXT.md per project) ·
 **Proposed** (review queue — approve / reject / push).
 
-Flow: dump → `Distill all` → open a project in Context → `Plan this` →
-review in Proposed → `Approve` → `Push to krill`.
+Flow: **Onboard** a project (Context) → **Dump** requests (Inbox) → **Plan** →
+review in **Proposed** → **Approve** → **Push to krill**.
 
 ## Pipeline
 
 ```
-dump ─▶ inbox ─▶ DISTILLER ─▶ CONTEXT.md (per project)
-                                   │
-                     PLANNER (Augusto + Maria) ─▶ proposed tasks
-                                   │
-                     TRIAGE (ai-team risk rubric) ─▶ 🟢 bypass / 🟡🔴 review
-                                   │
-                     krill POST /api/tasks (skip_plan_review = bypass)
-ROUTER: a raw dump ─▶ task | new_project (gated) | context | ask
+onboard ─▶ CONTEXT.md (per project, background)    dump ─▶ work requests (pending)
+                               │                              │
+            PLANNER (Augusto + Maria): context + requests ─▶ proposed tasks
+                               │
+            TRIAGE (ai-team risk rubric) ─▶ 🟢 bypass / 🟡🔴 review
+                               │
+            krill POST /api/tasks (skip_plan_review = bypass)
 ```
 
 Triage is **deterministic** — it reads the safe-words + risk tiers straight from
@@ -74,8 +73,8 @@ WHALE_RUNNER=real npm start            # requires the `claude` CLI installed + a
 ```
 
 whale mirrors krill: it spawns the **Claude Code CLI** (`claude`) on your existing
-Claude Code auth — **no API key, no separate billing**. Distiller/planner/router/
-audit/refine then run real Claude (Haiku for distill+route, Sonnet for plan+refine);
+Claude Code auth — **no API key, no separate billing**. Planner / router / audit /
+refine then run real Claude (Haiku for route, Sonnet for plan/refine/audit);
 triage stays deterministic. Set `CLAUDE_BIN` if `claude` isn't on PATH.
 
 ### Autonomy ladder (B1)

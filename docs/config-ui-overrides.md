@@ -19,8 +19,7 @@ Behavior you'd flip per-session as trust grows:
 | Setting | env today | Why runtime |
 |---|---|---|
 | `runner` | `WHALE_RUNNER` | flip stub↔real without bouncing the server |
-| `models.distill` | `WHALE_MODEL_DISTILL` | tier tuning is iterative |
-| `models.plan` | `WHALE_MODEL_PLAN` | " |
+| `models.plan` | `WHALE_MODEL_PLAN` | tier tuning is iterative |
 | `models.route` | `WHALE_MODEL_ROUTE` | " |
 | `autonomy.bypass` | `WHALE_BYPASS` | the core dial — loosen as override rate drops |
 | `autonomy.autoPush` | `WHALE_AUTOPUSH` | toggle staged vs auto-push |
@@ -67,7 +66,7 @@ weakening the guard.
 ## Implementation shape (for the follow-up build session)
 
 1. **whale.db** — a `config` singleton table (id=1), mirroring krill's
-   `global_config`. Columns for the tunables only: `runner`, `model_distill`,
+   `global_config`. Columns for the tunables only: `runner`,
    `model_plan`, `model_route`, `bypass`, `auto_push` (int bool),
    `allow_new_projects` (int bool). **No `protected` column.**
 2. **`config.mjs` refactor — read live, not frozen.** Replace the module-level
@@ -100,7 +99,7 @@ infra, can stay static), `server.mjs` (startup log + health only).
   still needs krill's `allow_auto_finish` (off by default) + the arm-time confirm.
   Net new risk is bounded; the guard does not move.
 - **runner stub↔real flip at runtime:** fine (each stage checks `isReal()` live);
-  a flip mid-distill just applies to the next stage call.
+  a flip mid-run just applies to the next stage call.
 - **`.env` drift vs DB:** once the DB row exists, `.env` edits to tunables look
   ignored (confusing). Mitigate with the "reset to env" action + a UI note that DB
   overrides env for tunables.

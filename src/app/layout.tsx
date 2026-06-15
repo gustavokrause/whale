@@ -19,7 +19,7 @@ const ubuntuMono = Ubuntu_Mono({
 
 export const metadata: Metadata = {
   title: "whale",
-  description: "Strategy brain on top of krill: capture → distill → plan → triage → execute.",
+  description: "Strategy brain on top of krill: capture requests → plan → triage → execute.",
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };

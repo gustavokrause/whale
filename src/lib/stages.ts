@@ -42,7 +42,7 @@ export type RouteResult = {
 /* ---------- PLANNER: pending requests (grounded by audit context) -> proposed ---------- */
 // A dump tagged to a project IS a work request (an inbox_entries row). Plan reads
 // the project's pending requests + the audit CONTEXT (background reference, never
-// rewritten) → proposed tasks, then marks those requests planned. No distill step.
+// rewritten) → proposed tasks, then marks those requests planned.
 
 export async function plan(team: Team, key: string): Promise<ProposedTask[]> {
   const reqs = pendingRequests(key);

@@ -23,7 +23,7 @@ export const keyToSlug = (key: string | null | undefined): string =>
 
 const fileFor = (key: string) => path.join(DIR, `${keyToSlug(key)}.md`);
 
-// Real LLM stages (distill, audit) run via `claude --print` and sometimes emit a
+// The audit (onboard) runs via `claude --print` and sometimes emits a
 // thinking preamble before the contracted "# CONTEXT —" header. Strip anything
 // before the first CONTEXT heading so stored memory matches the contract.
 function normalizeContext(md: string): string {

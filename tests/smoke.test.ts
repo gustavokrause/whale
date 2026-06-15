@@ -41,8 +41,8 @@ test("db inbox + proposed round-trip", () => {
   assert.equal(listEntries().length, 1);
   assert.equal(rawEntries().length, 1);
 
-  markEntries([e.id], "distilled");
-  assert.equal(rawEntries().length, 0, "distilled entries leave the raw queue");
+  markEntries([e.id], "planned");
+  assert.equal(rawEntries().length, 0, "planned entries leave the pending queue");
 
   const t = addProposed({ project_key: "krill", name: "x", risk_tier: "low", bypass: true, deps: ["y"] });
   assert.equal(listProposed("proposed").length, 1);
