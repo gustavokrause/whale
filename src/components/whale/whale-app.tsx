@@ -87,6 +87,18 @@ export function WhaleApp() {
     loadStatus();
   }, [loadStatus]);
 
+  // SSE: live push on any data mutation. `rev` bumps → mounted tabs reload.
+  const [rev, setRev] = useState(0);
+  useEffect(() => {
+    const es = new EventSource("/api/stream");
+    es.onmessage = () => {
+      setRev((r) => r + 1);
+      loadStatus();
+    };
+    es.onerror = () => {}; // browser auto-reconnects
+    return () => es.close();
+  }, [loadStatus]);
+
   const go = (t: Tab) => {
     window.location.hash = t;
   };
@@ -133,16 +145,16 @@ export function WhaleApp() {
         {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
             switch, like the original display:none UI. Polling is gated by `active`. */}
         <div hidden={tab !== "inbox"}>
-          <InboxTab withBusy={withBusy} onChange={loadStatus} active={tab === "inbox"} />
+          <InboxTab withBusy={withBusy} onChange={loadStatus} active={tab === "inbox"} rev={rev} />
         </div>
         <div hidden={tab !== "context"}>
-          <ContextTab withBusy={withBusy} />
+          <ContextTab withBusy={withBusy} rev={rev} />
         </div>
         <div hidden={tab !== "proposed"}>
-          <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} />
+          <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} rev={rev} />
         </div>
         <div hidden={tab !== "settings"}>
-          <SettingsTab withBusy={withBusy} onSaved={loadStatus} />
+          <SettingsTab withBusy={withBusy} onSaved={loadStatus} rev={rev} />
         </div>
       </main>
 
@@ -159,7 +171,7 @@ const actBtn = `${btn} bg-success text-white`;
 const ghost = `${btn} bg-surface-2 text-text border border-border`;
 const danger = `${btn} bg-danger/10 text-danger border border-danger/40`;
 
-function InboxTab({ withBusy, onChange, active }: { withBusy: Busy; onChange: () => void; active: boolean }) {
+function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number }) {
   const [entries, setEntries] = useState<InboxEntry[]>([]);
   const [text, setText] = useState("");
   const [hintVal, setHintVal] = useState("");
@@ -169,7 +181,7 @@ function InboxTab({ withBusy, onChange, active }: { withBusy: Busy; onChange: ()
     load();
     const id = setInterval(() => active && !document.hidden && load(), 5000);
     return () => clearInterval(id);
-  }, [load, active]);
+  }, [load, active, rev]);
 
   const dump = async () => {
     if (!text.trim()) return;
@@ -245,7 +257,7 @@ function InboxTab({ withBusy, onChange, active }: { withBusy: Busy; onChange: ()
   );
 }
 
-function ContextTab({ withBusy }: { withBusy: Busy }) {
+function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
   const [keys, setKeys] = useState<string[]>([]);
   const [sel, setSel] = useState<string | null>(null);
   const [md, setMd] = useState("");
@@ -254,7 +266,7 @@ function ContextTab({ withBusy }: { withBusy: Busy }) {
   const load = useCallback(async () => setKeys((await j("/api/context")).keys), []);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, rev]);
 
   const view = async (k: string) => {
     setSel(k);
@@ -318,7 +330,7 @@ function ContextTab({ withBusy }: { withBusy: Busy }) {
 
 type EnrichedTask = ProposedTask & { krill_status?: string | null };
 
-function ProposedTab({ withBusy, onChange, active }: { withBusy: Busy; onChange: () => void; active: boolean }) {
+function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number }) {
   const [items, setItems] = useState<EnrichedTask[]>([]);
   const [showRej, setShowRej] = useState(false);
   const [batchKey, setBatchKey] = useState("");
@@ -329,7 +341,7 @@ function ProposedTab({ withBusy, onChange, active }: { withBusy: Busy; onChange:
     load();
     const id = setInterval(() => active && !document.hidden && load(), 5000);
     return () => clearInterval(id);
-  }, [load, active]);
+  }, [load, active, rev]);
 
   const act = async (id: string, action: string) => {
     let r = await withBusy(action, post(`/api/proposed/${id}/${action}`));
@@ -468,12 +480,12 @@ function ProposedTab({ withBusy, onChange, active }: { withBusy: Busy; onChange:
   );
 }
 
-function SettingsTab({ withBusy, onSaved }: { withBusy: Busy; onSaved: () => void }) {
+function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () => void; rev: number }) {
   const [c, setC] = useState<ConfigSnap | null>(null);
   const load = useCallback(async () => setC(await j("/api/config")), []);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, rev]);
 
   if (!c) return <p className="text-text-2">loading…</p>;
 

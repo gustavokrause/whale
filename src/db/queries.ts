@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, asc, desc } from "drizzle-orm";
 import { db } from "./client";
+import { broadcast } from "@/lib/events";
 import {
   inboxEntries,
   proposedTasks,
@@ -30,6 +31,7 @@ export function addEntry({
   db.insert(inboxEntries)
     .values({ id, text: trimmed, source, project_hint: projectHint, status: "raw", created_at: Date.now() })
     .run();
+  broadcast();
   return getEntry(id)!;
 }
 
@@ -45,6 +47,7 @@ export const rawEntries = (): InboxEntry[] =>
 export function markEntries(ids: string[], status: string) {
   for (const id of ids)
     db.update(inboxEntries).set({ status }).where(eq(inboxEntries.id, id)).run();
+  broadcast();
 }
 
 /** Persist the router's decision: set the lane, keep an existing hint else fill it. */
@@ -55,11 +58,15 @@ export function setEntryLane(
   const e = getEntry(id);
   const hint = (e?.project_hint || "").trim() || projectHint || null;
   db.update(inboxEntries).set({ lane, project_hint: hint }).where(eq(inboxEntries.id, id)).run();
+  broadcast();
   return getEntry(id);
 }
 
-export const deleteEntry = (id: string) =>
-  db.delete(inboxEntries).where(eq(inboxEntries.id, id)).run();
+export const deleteEntry = (id: string) => {
+  const r = db.delete(inboxEntries).where(eq(inboxEntries.id, id)).run();
+  broadcast();
+  return r;
+};
 
 /** distinct project keys seen in the inbox (null hint => 'global') */
 export const projectKeys = (): string[] => {
@@ -101,6 +108,7 @@ export function addProposed(t: ProposedInput): ProposedTask {
       created_at: Date.now(),
     })
     .run();
+  broadcast();
   return getProposed(id)!;
 }
 
@@ -118,11 +126,15 @@ export function updateProposed(
 ): ProposedTask {
   if (Object.keys(fields).length)
     db.update(proposedTasks).set(fields).where(eq(proposedTasks.id, id)).run();
+  broadcast();
   return getProposed(id)!;
 }
 
-export const deleteProposed = (id: string) =>
-  db.delete(proposedTasks).where(eq(proposedTasks.id, id)).run();
+export const deleteProposed = (id: string) => {
+  const r = db.delete(proposedTasks).where(eq(proposedTasks.id, id)).run();
+  broadcast();
+  return r;
+};
 
 /* ---- runtime config (UI-overridable subset; see lib/config.ts) ---- */
 
@@ -139,5 +151,6 @@ export function writeConfig(fields: Partial<typeof configTable.$inferInsert>): C
   const { id: _omit, ...rest } = fields;
   if (Object.keys(rest).length)
     db.update(configTable).set(rest).where(eq(configTable.id, 1)).run();
+  broadcast();
   return readConfig();
 }
