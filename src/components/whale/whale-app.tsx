@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Circle, Trash2, ArrowRight, Pencil, Sun, Moon } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
 type Status = {
@@ -175,6 +176,7 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
   const [entries, setEntries] = useState<InboxEntry[]>([]);
   const [text, setText] = useState("");
   const [hintVal, setHintVal] = useState("");
+  const { push } = useToast();
 
   const load = useCallback(async () => setEntries((await j("/api/inbox")).entries), []);
   useEffect(() => {
@@ -193,13 +195,13 @@ function InboxTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChang
   };
   const distill = async () => {
     const r = await withBusy("Distilling all notes", post("/api/distill"));
-    alert(`Distilled ${r.distilled} note(s) → ${(r.keys || []).map((k: { key: string }) => k.key).join(", ")}`);
+    push({ variant: "success", title: `Distilled ${r.distilled} note(s)`, description: (r.keys || []).map((k: { key: string }) => k.key).join(", ") || "—" });
     load();
     onChange();
   };
   const route = async (id: string) => {
     const r = await withBusy("Routing note", post("/api/route", { id }));
-    alert(`Filed as: ${r.lane}${r.projectKey ? ` [${r.projectKey}]` : ""}${r.gated ? `\n(${r.note})` : ""}\nwhy: ${r.reason || ""}`);
+    push({ variant: "info", title: `Filed as ${r.lane}${r.projectKey ? ` [${r.projectKey}]` : ""}`, description: r.gated ? r.note : r.reason || "" });
     load();
   };
   const del = async (id: string) => {
@@ -262,6 +264,7 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
   const [sel, setSel] = useState<string | null>(null);
   const [md, setMd] = useState("");
   const [obk, setObk] = useState("");
+  const { push } = useToast();
 
   const load = useCallback(async () => setKeys((await j("/api/context")).keys), []);
   useEffect(() => {
@@ -275,13 +278,14 @@ function ContextTab({ withBusy, rev }: { withBusy: Busy; rev: number }) {
   const onboard = async () => {
     if (!obk.trim()) return;
     const r = await withBusy(`Auditing ${obk} (real Claude — 1-3 min)`, post("/api/onboard", { key: obk.trim() }));
-    alert(r.ok ? `Onboarded ${r.key} → CONTEXT (${r.chars} chars).` : `⚠ ${r.note || r.error}`);
+    if (r.ok) push({ variant: "success", title: `Onboarded ${r.key}`, description: `${r.chars} chars → CONTEXT` });
+    else push({ variant: "danger", title: "Onboard failed", description: r.note || r.error });
     setObk("");
     load();
   };
   const plan = async (k: string) => {
     const r = await withBusy(`Planning ${k} (real Claude)`, post("/api/plan", { key: k }));
-    alert(`Proposed ${(r.proposed || []).length} task(s) for ${k}. Review them in the Proposed tab.`);
+    push({ variant: "success", title: `Proposed ${(r.proposed || []).length} task(s) for ${k}`, description: "Review in the Proposed tab" });
   };
 
   return (
@@ -334,6 +338,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   const [items, setItems] = useState<EnrichedTask[]>([]);
   const [showRej, setShowRej] = useState(false);
   const [batchKey, setBatchKey] = useState("");
+  const { push } = useToast();
 
   // ?sync=1 reads back live krill status for pushed tasks (Gap A — no more stale rows)
   const load = useCallback(async () => setItems((await j("/api/proposed?sync=1")).proposed), []);
@@ -349,8 +354,8 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
       if (!confirm(`⚠ ARM AUTO-FINISH\n\n${r.message}`)) return load();
       r = await withBusy(action, post(`/api/proposed/${id}/${action}`, { confirm: true }));
     }
-    if (r.error) alert(`⚠ ${r.error}`);
-    else if (r.note) alert(r.note);
+    if (r.error) push({ variant: "danger", title: "Failed", description: r.error });
+    else if (r.note) push({ variant: "info", title: r.note });
     load();
     onChange();
   };
@@ -358,15 +363,15 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
     const input = prompt("Input — what should change about this task?");
     if (!input) return;
     const r = await withBusy("Refining task (real Claude)", post(`/api/proposed/${id}/refine`, { input }));
-    if (r.error) alert(`⚠ ${r.error}`);
-    else alert(`Refined → ${r.task.name}\nflow: ${r.flow}`);
+    if (r.error) push({ variant: "danger", title: "Refine failed", description: r.error });
+    else push({ variant: "success", title: `Refined → ${r.task.name}`, description: `flow: ${r.flow}` });
     load();
   };
   const reassign = async (id: string) => {
     const k = prompt("Reassign to which project? (e.g. whale, krill, arqtrack)");
     if (!k) return;
     const r = await withBusy("Reassigning + re-triaging", post(`/api/proposed/${id}/reassign`, { project_key: k.trim() }));
-    if (r.error) alert(`⚠ ${r.error}`);
+    if (r.error) push({ variant: "danger", title: "Reassign failed", description: r.error });
     load();
   };
   const del = async (id: string) => {
@@ -382,7 +387,8 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
       if (!confirm(`⚠ ARM AUTO-FINISH\n\n${r.message}`)) return load();
       r = await withBusy("Pushing batch to krill", post("/api/proposed/push-batch", { key: batchKey.trim(), confirm: true }));
     }
-    alert(r.ok ? `Pushed ${r.pushed}/${r.total || r.pushed} to krill.` : `⚠ ${r.error}`);
+    if (r.ok) push({ variant: "success", title: `Pushed ${r.pushed}/${r.total || r.pushed} to krill` });
+    else push({ variant: "danger", title: "Batch push failed", description: r.error });
     load();
   };
 
@@ -482,6 +488,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
 
 function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () => void; rev: number }) {
   const [c, setC] = useState<ConfigSnap | null>(null);
+  const { push } = useToast();
   const load = useCallback(async () => setC(await j("/api/config")), []);
   useEffect(() => {
     load();
@@ -495,10 +502,12 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     }));
-    if (r.error) alert(`⚠ ${r.error}`);
-    else {
+    if (r.error) {
+      push({ variant: "danger", title: "Save failed", description: r.error });
+    } else {
       setC(r);
       onSaved();
+      push({ variant: "success", title: "Saved — applied live" });
     }
   };
 

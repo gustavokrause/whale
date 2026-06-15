@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Ubuntu, Ubuntu_Mono } from "next/font/google";
 import "./globals.css";
+import { ToastProvider } from "@/components/ui/toast";
 
 const ubuntu = Ubuntu({
   subsets: ["latin"],
@@ -32,7 +33,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: SET_THEME }} />
       </head>
-      <body className="font-mono bg-bg text-text antialiased min-h-screen">{children}</body>
+      <body className="font-mono bg-bg text-text antialiased min-h-screen">
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }
