@@ -6,11 +6,15 @@ import { keyToSlug } from "./context-store";
 
 const base = () => config.krill.baseUrl.replace(/\/$/, "");
 
-async function call(method: string, pathname: string, body?: unknown) {
+async function call(method: string, pathname: string, body?: unknown, timeoutMs = 15000) {
+  // Always bound the request: a krill that is down refuses fast, but one that
+  // is restarting can accept the socket and never respond — without a timeout
+  // that hangs the caller forever (e.g. /api/status stuck on "connecting…").
   const res = await fetch(base() + pathname, {
     method,
     headers: { "content-type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const text = await res.text();
   if (!res.ok)
@@ -28,7 +32,7 @@ export type KrillProject = {
 
 export async function ping(): Promise<boolean> {
   try {
-    await call("GET", "/api/health");
+    await call("GET", "/api/health", undefined, 2500);
     return true;
   } catch {
     return false;

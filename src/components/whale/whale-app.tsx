@@ -137,6 +137,9 @@ export function WhaleApp() {
 
   useEffect(() => {
     loadStatus();
+    // poll so krill going down/recovering reflects in the footer without a mutation
+    const id = setInterval(() => !document.hidden && loadStatus(), 15000);
+    return () => clearInterval(id);
   }, [loadStatus]);
 
   // SSE: live push on any data mutation. `rev` bumps → mounted tabs reload.
