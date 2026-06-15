@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Loader2,
   Circle,
@@ -455,18 +455,30 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
   const isJob = (kind: string, key: string) => jobs.some((x) => x.kind === kind && x.key === key);
   const [keys, setKeys] = useState<string[]>([]);
   const [stale, setStale] = useState<Record<string, { behind: number }>>({});
+  const [available, setAvailable] = useState<string[]>([]);
   const [obk, setObk] = useState("");
   const [seedMd, setSeedMd] = useState("");
   const [sel, setSel] = useState<string | null>(null);
   const [md, setMd] = useState("");
   const { push } = useToast();
   const dlg = useDialog();
+  const obkRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     const r = await j("/api/context?stale=1");
-    setKeys(r.keys || []);
+    const k: string[] = r.keys || [];
+    setKeys(k);
     setStale(r.stale || {});
+    const ps: string[] = (await j("/api/projects")).projects || [];
+    setAvailable(ps.filter((p) => !k.includes(p))); // krill projects without context yet
   }, []);
+
+  // Prefill the onboard/seed form with a project, then focus it — intent-driven,
+  // no auto-audit on click (plan auto-derives; this is the "do it now" shortcut).
+  const pick = (p: string) => {
+    setObk(p);
+    obkRef.current?.focus();
+  };
   useEffect(() => {
     load();
   }, [load, rev]);
@@ -519,6 +531,7 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
       </p>
       <div className="space-y-2.5">
         <input
+          ref={obkRef}
           value={obk}
           onChange={(e) => setObk(e.target.value)}
           placeholder="project key (e.g. arqtrack, krill)"
@@ -538,6 +551,18 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
           {seedMd.trim() ? "Seed context" : "Onboard (audit repo)"} <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
+      {available.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs text-text-2 mb-1.5">krill projects without context yet — click to onboard:</p>
+          <div className="flex gap-2 flex-wrap">
+            {available.map((p) => (
+              <button key={p} type="button" className={`${ghost} !px-2.5 !py-1.5 text-sm`} onClick={() => pick(p)}>
+                + {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {keys.length === 0 ? (
         <p className="text-text-2 mt-4">No context yet — it builds automatically when you Plan a repo project, or seed an idea project above.</p>
       ) : (
