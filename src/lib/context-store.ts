@@ -10,9 +10,11 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-const DIR =
+// Resolved lazily: calling process.cwd() at module top-level makes Next's file
+// tracer treat the whole project root as a dependency (NFT warnings).
+const getDir = () =>
   process.env.WHALE_CONTEXT_DIR ||
-  path.resolve(/*turbopackIgnore: true*/ process.cwd(), "data/context");
+  path.resolve(/* turbopackIgnore: true */ process.cwd(), "data/context");
 
 export const keyToSlug = (key: string | null | undefined): string =>
   (key || "global")
@@ -21,7 +23,7 @@ export const keyToSlug = (key: string | null | undefined): string =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "") || "global";
 
-const fileFor = (key: string) => path.join(DIR, `${keyToSlug(key)}.md`);
+const fileFor = (key: string) => path.join(getDir(), `${keyToSlug(key)}.md`);
 
 // The audit (onboard) runs via `claude --print` and sometimes emits a
 // thinking preamble before the contracted "# CONTEXT —" header. Strip anything
@@ -38,12 +40,13 @@ export function readContext(key: string): string {
 }
 
 export function writeContext(key: string, md: string): string {
-  mkdirSync(DIR, { recursive: true });
+  mkdirSync(getDir(), { recursive: true });
   writeFileSync(fileFor(key), normalizeContext(md), "utf8");
   return fileFor(key);
 }
 
 export function listContextKeys(): string[] {
+  const DIR = getDir();
   if (!existsSync(DIR)) return [];
   return readdirSync(DIR)
     .filter((f) => f.endsWith(".md"))
