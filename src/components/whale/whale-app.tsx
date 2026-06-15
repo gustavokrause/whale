@@ -1,8 +1,25 @@
 "use client";
 
+import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Circle, Trash2, ArrowRight, Pencil, Sun, Moon, RotateCw } from "lucide-react";
+import {
+  Loader2,
+  Circle,
+  Trash2,
+  ArrowRight,
+  Pencil,
+  Sun,
+  Moon,
+  RotateCw,
+  ChevronDown,
+  Inbox as InboxIcon,
+  BookOpen,
+  ListChecks,
+  Settings as SettingsIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { useDialog } from "@/components/ui/dialog-provider";
 import { WhaleIcon } from "@/components/app/whale-icon";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
@@ -23,6 +40,33 @@ type ConfigSnap = {
 
 const TABS = ["inbox", "context", "proposed", "settings"] as const;
 type Tab = (typeof TABS)[number];
+
+const NAV: { id: Tab; label: string; Icon: LucideIcon }[] = [
+  { id: "inbox", label: "Inbox", Icon: InboxIcon },
+  { id: "context", label: "Context", Icon: BookOpen },
+  { id: "proposed", label: "Proposed", Icon: ListChecks },
+  { id: "settings", label: "Settings", Icon: SettingsIcon },
+];
+
+// Native <select> with the OS chevron suppressed and a real right-pad so the
+// value never collides with our own chevron. Drop-in for raw <select>.
+function NativeSelect({
+  className = "",
+  children,
+  ...props
+}: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <div className="relative inline-flex">
+      <select
+        {...props}
+        className={`appearance-none bg-surface text-text border border-border-strong rounded-lg font-mono pl-3 pr-9 py-2.5 focus:outline-none focus:border-primary ${className}`}
+      >
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text-2" />
+    </div>
+  );
+}
 
 const j = async (url: string, opts?: RequestInit) => (await fetch(url, opts)).json();
 const post = (url: string, body?: unknown) =>
@@ -111,72 +155,113 @@ export function WhaleApp() {
     window.location.hash = t;
   };
 
-  return (
-    <div>
-      {busy > 0 && <div className="fixed top-0 left-0 h-0.5 w-[30%] bg-primary animate-[ind_1.1s_linear_infinite] z-10" />}
-      <header className="px-5 py-3 border-b border-border flex flex-wrap items-center gap-x-3">
-        <span
-          className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-primary text-white shrink-0"
-          aria-label="whale"
-        >
-          <WhaleIcon className="h-4 w-4" />
-        </span>
-        {status ? (
-          <span className="text-xs text-text-2 inline-flex items-center gap-1">
-            runner={status.runner} · bypass={status.autonomy.bypass} · autoPush={String(status.autonomy.autoPush)} · krill
-            <Circle className={`h-2.5 w-2.5 ${status.krill.up ? "fill-success text-success" : "fill-danger text-danger"}`} />
-            · inbox {status.inbox.raw}/{status.inbox.total} · proposed {status.proposed.total}
-          </span>
-        ) : (
-          <span className="text-xs text-text-2">…</span>
-        )}
-        {busy > 0 && (
-          <span className="text-xs text-warning inline-flex items-center gap-1">
-            <Loader2 className="h-3 w-3 animate-spin" /> {busyLabel}…
-          </span>
-        )}
-        {jobs.length > 0 && (
-          <span className="text-xs text-info inline-flex items-center gap-1" title={jobs.map((x) => `${x.kind} ${x.key}`).join(", ")}>
-            <Loader2 className="h-3 w-3 animate-spin" /> {jobs.length} running
-          </span>
-        )}
-        <button onClick={toggleTheme} className="ml-auto p-1.5 rounded-lg text-text-2 hover:text-text" title="Toggle dark/light">
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
-      </header>
+  const counts: Partial<Record<Tab, number>> = {
+    inbox: status?.inbox.raw || 0,
+    proposed: status?.proposed.total || 0,
+  };
 
-      <div className="max-w-3xl mx-auto px-5 pt-3">
-        <nav className="flex gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => go(t)}
-              className={`px-4 py-2 rounded-t-lg text-sm capitalize border border-b-0 ${
-                tab === t
-                  ? "border-border text-text bg-gradient-to-b from-primary/20 to-white dark:bg-none dark:bg-surface dark:text-text -mb-px relative z-10"
-                  : "text-text-2 border-transparent hover:text-text"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+  return (
+    <div className="flex h-screen overflow-hidden">
+      {busy > 0 && <div className="fixed top-0 left-0 h-0.5 w-[30%] bg-primary animate-[ind_1.1s_linear_infinite] z-50" />}
+
+      {/* command rail */}
+      <aside className="w-56 shrink-0 flex flex-col border-r border-border bg-surface-2">
+        <div className="flex items-center gap-2.5 px-4 h-14 border-b border-border">
+          <span className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-primary text-white shrink-0" aria-label="whale">
+            <WhaleIcon className="h-4 w-4" />
+          </span>
+          <div className="leading-tight">
+            <div className="text-sm font-bold tracking-wide">whale</div>
+            <div className="text-[10px] text-text-3 uppercase tracking-[0.15em]">strategy brain</div>
+          </div>
+        </div>
+
+        <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
+          {NAV.map(({ id, label, Icon }) => {
+            const on = tab === id;
+            const n = counts[id] || 0;
+            return (
+              <button
+                key={id}
+                onClick={() => go(id)}
+                className={`group relative w-full flex items-center gap-2.5 pl-3.5 pr-2.5 py-2 rounded-lg text-sm transition-colors ${
+                  on ? "bg-surface text-text" : "text-text-2 hover:text-text hover:bg-surface/60"
+                }`}
+              >
+                <span className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary transition-opacity ${on ? "opacity-100" : "opacity-0"}`} />
+                <Icon className={`h-4 w-4 shrink-0 ${on ? "text-primary" : ""}`} />
+                <span className="flex-1 text-left">{label}</span>
+                {n > 0 && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${on ? "bg-primary/15 text-primary" : "bg-border text-text-2"}`}>
+                    {n}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        <main className="border border-border rounded-b-lg bg-bg dark:bg-surface p-5">
-        {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
-            switch, like the original display:none UI. Polling is gated by `active`. */}
-        <div hidden={tab !== "inbox"}>
-          <InboxTab withBusy={withBusy} onChange={loadStatus} active={tab === "inbox"} rev={rev} jobs={jobs} />
+        <div className="border-t border-border p-3 space-y-2">
+          {status ? (
+            <div className="text-[11px] text-text-2 leading-relaxed space-y-0.5">
+              <div>runner <span className="text-text">{status.runner}</span></div>
+              <div>bypass <span className="text-text">{status.autonomy.bypass}</span></div>
+              <div className="inline-flex items-center gap-1">
+                krill
+                <Circle className={`h-2 w-2 ${status.krill.up ? "fill-success text-success" : "fill-danger text-danger"}`} />
+                <span className="text-text">{status.krill.up ? "up" : "down"}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="text-[11px] text-text-3">connecting…</div>
+          )}
+          {jobs.length > 0 && (
+            <div className="text-[11px] text-info inline-flex items-center gap-1" title={jobs.map((x) => `${x.kind} ${x.key}`).join(", ")}>
+              <Loader2 className="h-3 w-3 animate-spin" /> {jobs.length} job{jobs.length === 1 ? "" : "s"} running
+            </div>
+          )}
+          <button
+            onClick={toggleTheme}
+            className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-text-2 hover:text-text border border-border hover:bg-surface"
+            title="Toggle dark/light"
+          >
+            {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            {theme === "dark" ? "Light" : "Dark"}
+          </button>
         </div>
-        <div hidden={tab !== "context"}>
-          <ContextTab withBusy={withBusy} rev={rev} jobs={jobs} />
-        </div>
-        <div hidden={tab !== "proposed"}>
-          <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} rev={rev} />
-        </div>
-        <div hidden={tab !== "settings"}>
-          <SettingsTab withBusy={withBusy} onSaved={loadStatus} rev={rev} />
-        </div>
+      </aside>
+
+      {/* working area — full width */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="h-14 shrink-0 border-b border-border flex items-center gap-3 px-6">
+          <h1 className="text-base font-bold capitalize">{tab}</h1>
+          {busy > 0 && (
+            <span className="text-xs text-warning inline-flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" /> {busyLabel}…
+            </span>
+          )}
+          {status && (
+            <span className="ml-auto text-xs text-text-2">
+              inbox {status.inbox.raw}/{status.inbox.total} · proposed {status.proposed.total} · autoPush {String(status.autonomy.autoPush)}
+            </span>
+          )}
+        </header>
+
+        <main className="flex-1 overflow-y-auto px-6 py-6">
+          {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
+              switch, like the original display:none UI. Polling is gated by `active`. */}
+          <div hidden={tab !== "inbox"}>
+            <InboxTab withBusy={withBusy} onChange={loadStatus} active={tab === "inbox"} rev={rev} jobs={jobs} />
+          </div>
+          <div hidden={tab !== "context"}>
+            <ContextTab withBusy={withBusy} rev={rev} jobs={jobs} />
+          </div>
+          <div hidden={tab !== "proposed"}>
+            <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} rev={rev} />
+          </div>
+          <div hidden={tab !== "settings"}>
+            <SettingsTab withBusy={withBusy} onSaved={loadStatus} rev={rev} />
+          </div>
         </main>
       </div>
 
@@ -200,6 +285,7 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
   const [project, setProject] = useState("");
   const [projects, setProjects] = useState<string[]>([]);
   const { push } = useToast();
+  const dlg = useDialog();
 
   const load = useCallback(async () => {
     setEntries((await j("/api/inbox")).entries);
@@ -231,16 +317,27 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
     onChange();
   };
   const moveEntry = async (id: string) => {
-    const k = prompt(`Move to which onboarded project?\n${projects.join(", ")}`);
-    if (!k) return;
-    await withBusy("Moving", j(`/api/inbox/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_hint: k.trim() }) }));
+    const k = await dlg.prompt({
+      title: "Move to project",
+      description: `Onboarded projects: ${projects.join(", ") || "none yet"}`,
+      placeholder: "project key",
+      confirmLabel: "Move",
+    });
+    const key = k?.trim();
+    if (!key) return;
+    await withBusy("Moving", j(`/api/inbox/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_hint: key }) }));
     load();
     onChange();
   };
   const makeProject = async (id: string, body: string) => {
-    const k = prompt("New project key for this idea:");
-    if (!k) return;
-    const key = k.trim();
+    const k = await dlg.prompt({
+      title: "Make project",
+      description: "New project key seeded from this idea.",
+      placeholder: "e.g. arqtrack",
+      confirmLabel: "Create",
+    });
+    const key = k?.trim();
+    if (!key) return;
     await withBusy(`Creating ${key}`, post("/api/context", { key, md: `# CONTEXT — ${key}\n\n## Idea\n${body}\n` }));
     await j(`/api/inbox/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_hint: key }) });
     push({ variant: "success", title: `Created ${key}`, description: "seeded + request moved — Plan it" });
@@ -248,7 +345,7 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
     onChange();
   };
   const del = async (id: string) => {
-    if (!confirm("Delete this request permanently?")) return;
+    if (!(await dlg.confirm({ title: "Delete request?", description: "This permanently removes the request.", confirmLabel: "Delete", confirmVariant: "danger" }))) return;
     await withBusy("Deleting", j(`/api/inbox/${id}`, { method: "DELETE" }));
     load();
     onChange();
@@ -279,16 +376,16 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
         autoFocus
       />
       <div className="flex gap-2.5 mt-2.5 flex-wrap items-center">
-        <select
+        <NativeSelect
           value={project}
           onChange={(e) => setProject(e.target.value)}
-          className="px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono min-w-[160px]"
+          className="min-w-[180px]"
         >
           <option value="">— unassigned (capture) —</option>
           {projects.map((p) => (
             <option key={p} value={p}>{p}</option>
           ))}
-        </select>
+        </NativeSelect>
         <button className={`${actBtn} ${dis}`} onClick={dump} disabled={!text.trim()}>
           {project ? "Dump request" : "Capture"}
         </button>
@@ -476,6 +573,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   const [showRej, setShowRej] = useState(false);
   const [projects, setProjects] = useState<string[]>([]);
   const { push } = useToast();
+  const dlg = useDialog();
 
   // ?sync=1 reads back live krill status for pushed tasks (Gap A — no more stale rows)
   const load = useCallback(async () => {
@@ -491,7 +589,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   const act = async (id: string, action: string) => {
     let r = await withBusy(action, post(`/api/proposed/${id}/${action}`));
     if (r.needsConfirm) {
-      if (!confirm(`⚠ ARM AUTO-FINISH\n\n${r.message}`)) return load();
+      if (!(await dlg.confirm({ title: "⚠ Arm auto-finish", description: r.message, confirmLabel: "Arm", confirmVariant: "danger" }))) return load();
       r = await withBusy(action, post(`/api/proposed/${id}/${action}`, { confirm: true }));
     }
     if (r.error) push({ variant: "danger", title: "Failed", description: r.error });
@@ -500,22 +598,34 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
     onChange();
   };
   const refine = async (id: string) => {
-    const input = prompt("Input — what should change about this task?");
-    if (!input) return;
+    const input = await dlg.prompt({
+      title: "Refine task",
+      description: "What should change about this task?",
+      placeholder: "e.g. split into two, lower the risk, add tests…",
+      multiline: true,
+      confirmLabel: "Refine",
+    });
+    if (!input?.trim()) return;
     const r = await withBusy("Refining task (real Claude)", post(`/api/proposed/${id}/refine`, { input }));
     if (r.error) push({ variant: "danger", title: "Refine failed", description: r.error });
     else push({ variant: "success", title: `Refined → ${r.task.name}`, description: `flow: ${r.flow}` });
     load();
   };
   const reassign = async (id: string) => {
-    const k = prompt(`Reassign to which project?\n${projects.join(", ")}`);
-    if (!k) return;
-    const r = await withBusy("Reassigning + re-triaging", post(`/api/proposed/${id}/reassign`, { project_key: k.trim() }));
+    const k = await dlg.prompt({
+      title: "Reassign task",
+      description: `Projects: ${projects.join(", ") || "none yet"}`,
+      placeholder: "project key",
+      confirmLabel: "Reassign",
+    });
+    const key = k?.trim();
+    if (!key) return;
+    const r = await withBusy("Reassigning + re-triaging", post(`/api/proposed/${id}/reassign`, { project_key: key }));
     if (r.error) push({ variant: "danger", title: "Reassign failed", description: r.error });
     load();
   };
   const del = async (id: string) => {
-    if (!confirm("Delete this proposal permanently?\n(whale-local — does not touch krill.)")) return;
+    if (!(await dlg.confirm({ title: "Delete proposal?", description: "whale-local — does not touch krill.", confirmLabel: "Delete", confirmVariant: "danger" }))) return;
     await withBusy("Deleting", j(`/api/proposed/${id}`, { method: "DELETE" }));
     load();
     onChange();
@@ -523,7 +633,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   const pushBatch = async (key: string) => {
     let r = await withBusy(`Pushing ${key} to krill`, post("/api/proposed/push-batch", { key }));
     if (r.needsConfirm) {
-      if (!confirm(`⚠ ARM AUTO-FINISH\n\n${r.message}`)) return load();
+      if (!(await dlg.confirm({ title: "⚠ Arm auto-finish", description: r.message, confirmLabel: "Arm", confirmVariant: "danger" }))) return load();
       r = await withBusy(`Pushing ${key} to krill`, post("/api/proposed/push-batch", { key, confirm: true }));
     }
     if (r.ok) push({ variant: "success", title: `Pushed ${r.pushed}/${r.total || r.pushed} to krill` });
@@ -659,7 +769,6 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
     }
   };
 
-  const sel = "px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono";
   const M = ["haiku", "sonnet", "opus"];
 
   return (
@@ -669,26 +778,26 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
         env-only and read-only here: a no-auth LAN UI must not weaken it.
       </p>
       <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">runner</h3>
-      <select className={sel} value={c.runner} onChange={(e) => save({ runner: e.target.value })}>
+      <NativeSelect value={c.runner} onChange={(e) => save({ runner: e.target.value })}>
         {["stub", "real"].map((o) => <option key={o}>{o}</option>)}
-      </select>
+      </NativeSelect>
       <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">models</h3>
       <div className="flex gap-2 flex-wrap items-center">
         {(["plan", "route"] as const).map((m) => (
           <label key={m} className="flex items-center gap-1.5">
             {m}
-            <select className={sel} value={c.models[m]} onChange={(e) => save({ [`model_${m}`]: e.target.value })}>
+            <NativeSelect value={c.models[m]} onChange={(e) => save({ [`model_${m}`]: e.target.value })}>
               {M.map((o) => <option key={o}>{o}</option>)}
-            </select>
+            </NativeSelect>
           </label>
         ))}
       </div>
       <h3 className="mt-4 mb-2 text-text-2 text-xs uppercase tracking-wide">autonomy</h3>
       <label className="flex items-center gap-1.5">
         bypass
-        <select className={sel} value={c.autonomy.bypass} onChange={(e) => save({ bypass: e.target.value })}>
+        <NativeSelect value={c.autonomy.bypass} onChange={(e) => save({ bypass: e.target.value })}>
           {["conservative", "balanced", "aggressive"].map((o) => <option key={o}>{o}</option>)}
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex items-center gap-2 mt-3">
         <input type="checkbox" checked={c.autonomy.autoPush} onChange={(e) => save({ auto_push: e.target.checked })} />
