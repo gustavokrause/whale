@@ -1,12 +1,12 @@
-// baleia — Phase 0: persona-loader
+// whale — Phase 0: persona-loader
 //
 // Reads the ai-team repo (source of truth) and produces the three artifacts
-// baleia consumes at runtime:
+// whale consumes at runtime:
 //   1. routingDoctrine  — AGENTS.md (full text: routing + economy + base rules)
 //   2. risk             — { tiers, safeWords } parsed from AGENTS.md
 //   3. personas         — registry [{ name, area, folder, tone, systemPrompt }]
 //
-// One-way, read-only. baleia never writes back to ai-team.
+// One-way, read-only. whale never writes back to ai-team.
 // Spike in plain ESM so it runs with `node` (no build). Port into TS structure
 // once proven.
 

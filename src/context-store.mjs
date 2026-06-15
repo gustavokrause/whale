@@ -1,10 +1,10 @@
-// baleia — CONTEXT store. baleia owns its memory (keyed by project), so user
+// whale — CONTEXT store. whale owns its memory (keyed by project), so user
 // project repos stay clean. One living markdown file per project + 'global'.
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
-const DIR = process.env.BALEIA_CONTEXT_DIR || path.resolve(process.cwd(), "data/context");
+const DIR = process.env.WHALE_CONTEXT_DIR || path.resolve(process.cwd(), "data/context");
 
 export const keyToSlug = (key) =>
   (key || "global").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "global";

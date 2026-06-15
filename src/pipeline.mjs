@@ -1,4 +1,4 @@
-// baleia — orchestration + gates/dials. Ties the stages to krill, enforces the
+// whale — orchestration + gates/dials. Ties the stages to krill, enforces the
 // human gates (new-project always gated; high-risk never auto-pushes).
 
 import { homedir } from "node:os";
@@ -12,10 +12,10 @@ import * as krill from "./krill-client.mjs";
 const expandHome = (p) => (p?.startsWith("~") ? p.replace(/^~/, homedir()) : p);
 
 /**
- * Onboarding (B5): make baleia aware of a project. Code projects → read-only
+ * Onboarding (B5): make whale aware of a project. Code projects → read-only
  * audit (cwd = the project's real folder) → CONTEXT. Idea projects (no repo /
  * not in krill) → tell the user to seed. Awareness != autonomy: auditing
- * baleia/krill is fine; the self-edit guard still gates their execution.
+ * whale/krill is fine; the self-edit guard still gates their execution.
  */
 export async function onboard(team, key) {
   const meta = await krill.getProjectMeta(key);
@@ -25,7 +25,7 @@ export async function onboard(team, key) {
   const caio = team.personas.find((p) => p.name === "Caio");
   const system =
     `${caio?.systemPrompt || ""}\n\nYou are onboarding the project "${key}". Read the codebase ` +
-    `(read-only) and produce its CONTEXT.md. Be concrete and accurate — this becomes baleia's memory ` +
+    `(read-only) and produce its CONTEXT.md. Be concrete and accurate — this becomes whale's memory ` +
     `of the project.\nOUTPUT CONTRACT: return ONLY the markdown, starting with "# CONTEXT — ${key}". ` +
     `Sections: Goals, Stack, Structure, Current state, Open questions. No preamble, no code fences.`;
   const user = `Audit the repository in the working directory and output the full CONTEXT.md.`;
@@ -54,13 +54,13 @@ async function autoRouteUntagged(team, db) {
   }
 }
 
-/** Real project targets the router can pick from: baleia's own keys + krill's. */
+/** Real project targets the router can pick from: whale's own keys + krill's. */
 async function knownKeys(db) {
   return [...new Set([...projectKeys(db), ...(await krill.projectKeys())])];
 }
 
 /** Move a proposed task to a different project and re-triage it (risk may change
- *  — e.g. reassigning to baleia/krill triggers the self-edit guard). */
+ *  — e.g. reassigning to whale/krill triggers the self-edit guard). */
 export function reassign(team, db, id, projectKey) {
   const t = getProposed(db, id);
   if (!t) throw new Error("proposed task not found");

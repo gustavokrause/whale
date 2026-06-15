@@ -1,4 +1,4 @@
-// baleia -> krill over HTTP (never its DB). Tolerant: surfaces errors so the
+// whale -> krill over HTTP (never its DB). Tolerant: surfaces errors so the
 // pipeline can mark push_failed instead of crashing when krill is down.
 
 import { config } from "./config.mjs";
@@ -49,7 +49,7 @@ export async function projectKeys() {
   }
 }
 
-/** Resolve a baleia project_key to a krill project id by slug/name match. */
+/** Resolve a whale project_key to a krill project id by slug/name match. */
 export async function resolveProjectId(projectKey) {
   const want = keyToSlug(projectKey);
   const projects = await listProjects();
@@ -59,7 +59,7 @@ export async function resolveProjectId(projectKey) {
   return hit?.id || null;
 }
 
-/** Create a BACKLOG task. skip_plan_review carries baleia's bypass decision. */
+/** Create a BACKLOG task. skip_plan_review carries whale's bypass decision. */
 export async function createTask({ project_id, name, description, priority, mode, skip_plan_review, auto_publish, depends_on }) {
   return call("POST", "/api/tasks", {
     project_id,

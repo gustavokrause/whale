@@ -1,4 +1,4 @@
-// baleia — storage (node:sqlite, zero deps)
+// whale — storage (node:sqlite, zero deps)
 //
 // inbox_entries  : the global capture stream (Phase 1)
 // proposed_tasks : planner output awaiting human review / push to krill (Phase 1-2)

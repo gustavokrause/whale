@@ -1,9 +1,9 @@
-// baleia — minimal LAN UI (Helena/UX: zero-friction capture, guided review).
+// whale — minimal LAN UI (Helena/UX: zero-friction capture, guided review).
 // One file, no build. Tabs: Inbox · Context · Proposed. Helper text throughout.
 
 export const PAGE = `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>baleia</title>
+<title>whale</title>
 <style>
   :root{color-scheme:dark}*{box-sizing:border-box}
   body{margin:0;font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0d1117;color:#e6edf3}
@@ -34,7 +34,7 @@ export const PAGE = `<!doctype html><html lang="en"><head>
   pre{white-space:pre-wrap;background:#0f141a;border:1px solid #21262d;border-radius:8px;padding:14px;font:inherit}
   h3{margin:18px 0 8px;color:#9aa4ad;font-size:13px;text-transform:uppercase;letter-spacing:.05em}
 </style></head><body>
-<header><b>🐋 baleia</b><span class="s" id="status">…</span>
+<header><b>🐋 whale</b><span class="s" id="status">…</span>
   <div class="flow"><b>Dump</b> → <b>Distill</b> (→ Context) → <b>Plan</b> (→ Proposed) → <b>Approve</b> → <b>Push to krill</b></div>
 </header>
 <nav>
@@ -44,7 +44,7 @@ export const PAGE = `<!doctype html><html lang="en"><head>
 </nav>
 <main>
   <section id="inbox">
-    <p class="hint">Dump <b>anything</b> from any project — ⌘/Ctrl-Enter to send. A <i>project hint</i> is optional (baleia routes it if you skip it).
+    <p class="hint">Dump <b>anything</b> from any project — ⌘/Ctrl-Enter to send. A <i>project hint</i> is optional (whale routes it if you skip it).
        <b>Distill all</b> folds raw notes into per-project Context. <b>route?</b> files one note into a lane (task / context / new&nbsp;project / ask).</p>
     <textarea id="t" placeholder="A thought, a chat snippet, a request, whatever…" autofocus></textarea>
     <div class="row">
@@ -55,9 +55,9 @@ export const PAGE = `<!doctype html><html lang="en"><head>
     <ul id="ilist"><li class="empty">loading…</li></ul>
   </section>
   <section id="context" style="display:none">
-    <p class="hint">baleia's living memory — one <b>CONTEXT.md</b> per project, built from your dumps. Pick a project to read it, then <b>Plan this</b> to have the team propose tasks from it. <b>Onboard</b> audits a code project (read-only) into CONTEXT so baleia knows it.</p>
+    <p class="hint">whale's living memory — one <b>CONTEXT.md</b> per project, built from your dumps. Pick a project to read it, then <b>Plan this</b> to have the team propose tasks from it. <b>Onboard</b> audits a code project (read-only) into CONTEXT so whale knows it.</p>
     <div class="row">
-      <input id="obk" placeholder="project key to onboard (e.g. arqtrack, baleia)"/>
+      <input id="obk" placeholder="project key to onboard (e.g. arqtrack, whale)"/>
       <button class="ghost" onclick="onboard()" title="Audit a code project (read-only) into CONTEXT, or flag seed-needed for idea projects.">Onboard →</button>
     </div>
     <div id="ctxbody"></div>
@@ -127,7 +127,7 @@ async function loadProposed(){const {proposed}=await j('/api/proposed');const el
       (p.status==='proposed'?'<button class="act" onclick="pAct(\\''+p.id+'\\',\\'approve\\')" title="Accept this task. With autoPush off it stages for a manual push.">Approve</button>'+
         '<button class="ghost danger" onclick="pAct(\\''+p.id+'\\',\\'reject\\')" title="Discard this proposal.">Reject</button>':'')+
       (p.status==='approved'?'<button class="act" onclick="pAct(\\''+p.id+'\\',\\'push\\')" title="Send to krill as a BACKLOG task (carries the bypass flag).">Push to krill</button>':'')+
-      '<button class="ghost" onclick="refineTask(\\''+p.id+'\\')" title="Give input — baleia re-evaluates the task. Repeat until you Approve/Decline.">Input</button>'+
+      '<button class="ghost" onclick="refineTask(\\''+p.id+'\\')" title="Give input — whale re-evaluates the task. Repeat until you Approve/Decline.">Input</button>'+
       '<button class="ghost" onclick="reassignTask(\\''+p.id+'\\')" title="Move to a different project and re-triage (re-runs risk + self-edit guard).">Reassign</button>'+
       '</div>':'')+
     '</li>').join('')+'</ul>';}
@@ -139,7 +139,7 @@ async function pAct(id,a){const post=(body)=>j('/api/proposed/'+id+'/'+a,{method
   let r=await post();
   if(r.needsConfirm){ if(!confirm('⚠ ARM AUTO-FINISH\\n\\n'+r.message)){loadProposed();return;} r=await post({confirm:true}); }
   if(r.error)alert('⚠ '+r.error); else if(r.note)alert(r.note); else if(r.pushed)alert('Pushed to krill as '+(r.task&&r.task.krill_task_id||'?')); loadProposed();}
-async function reassignTask(id){const k=prompt('Reassign to which project? (e.g. baleia, krill, arqtrack, mv)'); if(!k)return;
+async function reassignTask(id){const k=prompt('Reassign to which project? (e.g. whale, krill, arqtrack, mv)'); if(!k)return;
   const r=await j('/api/proposed/'+id+'/reassign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_key:k.trim()})});
   if(r.error)alert('⚠ '+r.error); loadProposed();}
 

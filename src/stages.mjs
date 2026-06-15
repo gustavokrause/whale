@@ -1,4 +1,4 @@
-// baleia — the thinking stages. Each has a deterministic stub (runs now, no key)
+// whale — the thinking stages. Each has a deterministic stub (runs now, no key)
 // and a real path that uses the actual persona prompts loaded from ai-team.
 
 import { isReal, config } from "./config.mjs";
@@ -37,7 +37,7 @@ export async function distill(team, db) {
 function distillStub(key, prior, group) {
   const header = prior.trim()
     ? prior.trimEnd()
-    : `# CONTEXT — ${key}\n\n_Living file maintained by baleia._\n\n## Notes`;
+    : `# CONTEXT — ${key}\n\n_Living file maintained by whale._\n\n## Notes`;
   const bullets = group
     .map((e) => `- ${e.text.replace(/\n+/g, " ")}  _(${new Date(e.created_at).toISOString().slice(0, 10)})_`)
     .join("\n");
@@ -129,7 +129,7 @@ export function triage(team, task, dial = config.autonomy.bypass) {
   const safeWords = team?.risk?.safeWords || [];
   const hitsSafeWord = safeWords.some((w) => text.includes(w.toLowerCase()));
 
-  // self-modification guard: a task aimed at the orchestrator itself (baleia/
+  // self-modification guard: a task aimed at the orchestrator itself (whale/
   // krill) is always high-risk and never bypasses — a bad self-edit can break
   // the very automation running it.
   const isSelfEdit = config.autonomy.protected.includes((task.project_key || "").toLowerCase());

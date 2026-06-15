@@ -1,11 +1,11 @@
-# 🐋 baleia
+# 🐋 whale
 
 The strategy brain on top of [krill](../ai-auto-worflow). You dump anything;
-baleia captures it, distills it into living context, plans work with the
+whale captures it, distills it into living context, plans work with the
 [ai-team](../ai-team) personas, triages what needs your review vs. what
 bypasses, and drives krill to execute.
 
-> Krill feeds the whale. Krill runs tasks → PRs; baleia decides which tasks
+> Krill feeds the whale. Krill runs tasks → PRs; whale decides which tasks
 > exist, why, and who reviews them.
 
 See **[PLAN.md](PLAN.md)** for the full architecture.
@@ -13,10 +13,10 @@ See **[PLAN.md](PLAN.md)** for the full architecture.
 ## Boundary
 
 ```
-ai-team/  (personas, read-only)  ──▶  baleia  ──HTTP──▶  krill (execution)
+ai-team/  (personas, read-only)  ──▶  whale  ──HTTP──▶  krill (execution)
 ```
 
-One-way: baleia reads the personas, never writes them; talks to krill over its
+One-way: whale reads the personas, never writes them; talks to krill over its
 HTTP API, never its DB.
 
 ## Run
@@ -55,19 +55,19 @@ no LLM needed.
 ## Going real
 
 Default runner is `stub` (deterministic — the whole spine runs offline).
-Flip to persona-driven Claude. baleia mirrors krill: it spawns the **Claude Code
+Flip to persona-driven Claude. whale mirrors krill: it spawns the **Claude Code
 CLI** (`claude`), using your existing Claude Code auth — **no API key, no
 separate billing**.
 
 ```bash
-BALEIA_RUNNER=real npm start            # requires the `claude` CLI installed + authed
+WHALE_RUNNER=real npm start            # requires the `claude` CLI installed + authed
 ```
 
 Distiller/planner/router then run real Claude (Haiku/Sonnet); triage stays
 deterministic. Set `CLAUDE_BIN` if `claude` isn't on PATH.
 
-Dials (env): `BALEIA_BYPASS=conservative|balanced|aggressive`,
-`BALEIA_AUTOPUSH=1`, `BALEIA_ALLOW_NEW_PROJECTS=1`, `KRILL_URL`, `PERSONAS_DIR`.
+Dials (env): `WHALE_BYPASS=conservative|balanced|aggressive`,
+`WHALE_AUTOPUSH=1`, `WHALE_ALLOW_NEW_PROJECTS=1`, `KRILL_URL`, `PERSONAS_DIR`.
 
 ## Status — all phases (stub-runnable)
 

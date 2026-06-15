@@ -1,4 +1,4 @@
-// baleia smoke tests — the merge gate. Zero deps (node:test). Run: npm test
+// whale smoke tests — the merge gate. Zero deps (node:test). Run: npm test
 //
 // Covers the spine: persona-loader, db round-trip, and the triage gates
 // (incl. the self-edit guard that protects the orchestrator).
@@ -30,7 +30,7 @@ test("persona-loader reads the ai-team source of truth", async () => {
 });
 
 test("db inbox + proposed round-trip", () => {
-  const path = join(tmpdir(), `baleia-test-${randomUUID()}.db`);
+  const path = join(tmpdir(), `whale-test-${randomUUID()}.db`);
   const db = openDb(path);
   try {
     const e = addEntry(db, { text: "hello", projectHint: "krill" });
@@ -92,7 +92,7 @@ test("flow preview reflects the gates a task will hit (B3)", () => {
 });
 
 test("B3 refine: Input re-evaluates + re-triages + logs the turn", async () => {
-  const path = join(tmpdir(), `baleia-b3-${randomUUID()}.db`);
+  const path = join(tmpdir(), `whale-b3-${randomUUID()}.db`);
   const db = openDb(path);
   const team = { risk: { safeWords: [] } };
   try {
@@ -109,7 +109,7 @@ test("B3 refine: Input re-evaluates + re-triages + logs the turn", async () => {
 });
 
 test("B4 arm-time confirm: auto-finish push/batch needs a distinct confirm", async () => {
-  const path = join(tmpdir(), `baleia-b4-${randomUUID()}.db`);
+  const path = join(tmpdir(), `whale-b4-${randomUUID()}.db`);
   const db = openDb(path);
   try {
     const t = addProposed(db, { project_key: "arqtrack", name: "x", risk_tier: "low", auto_publish: true });
@@ -131,7 +131,7 @@ test("auto-finish rung (A2): auto_publish only for aggressive + low + non-self-e
   assert.equal(ap("fix typo", "arqtrack", "aggressive"), true, "aggressive low -> auto-finish");
   assert.equal(ap("fix typo", "arqtrack", "balanced"), false, "balanced low -> no auto-finish");
   assert.equal(ap("build a feature", "arqtrack", "aggressive"), false, "medium never auto-finishes");
-  assert.equal(ap("fix typo", "baleia", "aggressive"), false, "self-edit never auto-finishes");
+  assert.equal(ap("fix typo", "whale", "aggressive"), false, "self-edit never auto-finishes");
 });
 
 test("self-edit guard: orchestrator tasks never bypass, any dial", () => {

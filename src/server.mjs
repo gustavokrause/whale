@@ -1,7 +1,7 @@
-// baleia — server. Capture inbox + distiller + planner + triage + router + krill push.
+// whale — server. Capture inbox + distiller + planner + triage + router + krill push.
 // Built-in http, zero deps. Loads the persona team from ai-team (read-only).
 //
-// Run:  npm start    Env: BALEIA_PORT(4100) BALEIA_RUNNER(stub|real) KRILL_URL PERSONAS_DIR
+// Run:  npm start    Env: WHALE_PORT(4100) WHALE_RUNNER(stub|real) KRILL_URL PERSONAS_DIR
 
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
@@ -14,8 +14,8 @@ import { readContext, listContextKeys } from "./context-store.mjs";
 import { distillAll, planProject, approve, reject, push, routeEntry, reassign, onboard, pushBatch, refine } from "./pipeline.mjs";
 import { PAGE } from "./ui.mjs";
 
-const PORT = Number(process.env.BALEIA_PORT || 4100);
-const DB_PATH = process.env.BALEIA_DB || path.resolve(process.cwd(), "data/baleia.db");
+const PORT = Number(process.env.WHALE_PORT || 4100);
+const DB_PATH = process.env.WHALE_DB || path.resolve(process.cwd(), "data/whale.db");
 const db = openDb(DB_PATH);
 
 let team = null;
@@ -125,7 +125,7 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, "0.0.0.0", async () => {
   const lan = Object.values(networkInterfaces()).flat().find((i) => i && i.family === "IPv4" && !i.internal);
   try { await getTeam(); } catch (e) { console.error(`⚠ persona-loader: ${e.message}`); }
-  console.log(`🐋 baleia up — runner=${config.runner} bypass=${config.autonomy.bypass} autoPush=${config.autonomy.autoPush}`);
+  console.log(`🐋 whale up — runner=${config.runner} bypass=${config.autonomy.bypass} autoPush=${config.autonomy.autoPush}`);
   console.log(`   local : http://localhost:${PORT}`);
   if (lan) console.log(`   LAN   : http://${lan.address}:${PORT}  (phone)`);
   console.log(`   team  : ${team ? team.personas.length + " personas" : "NOT loaded"}  ·  krill: ${config.krill.baseUrl}`);

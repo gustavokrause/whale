@@ -1,4 +1,4 @@
-// baleia — LLM runner. Mirrors krill: spawns the Claude Code CLI (`claude`),
+// whale — LLM runner. Mirrors krill: spawns the Claude Code CLI (`claude`),
 // using your Claude Code auth. No API key, no separate billing line.
 //
 // Two modes:
@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
-const TIMEOUT_MS = Number(process.env.BALEIA_CLAUDE_TIMEOUT || 240000);
+const TIMEOUT_MS = Number(process.env.WHALE_CLAUDE_TIMEOUT || 240000);
 
 // Sandbox: block side-effecting AND repo-reading tools (planner must not wander).
 const SANDBOX_DISALLOWED = ["Write", "Edit", "Bash", "Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task"];
