@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { readContext, listContextKeys, writeContext } from "@/lib/context-store";
+import { readContext, listContextKeys, writeContext, deleteContext } from "@/lib/context-store";
 import { json, fail } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -22,4 +22,12 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return fail(e);
   }
+}
+
+// Forget a project's background context. whale-local — does not touch krill or
+// the repo. Idempotent: reports whether a file was actually removed.
+export function DELETE(req: NextRequest) {
+  const key = req.nextUrl.searchParams.get("key");
+  if (!key) return fail("key required");
+  return json({ ok: true, key, deleted: deleteContext(key) });
 }

@@ -7,6 +7,7 @@ import {
   writeFileSync,
   existsSync,
   readdirSync,
+  unlinkSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -43,6 +44,15 @@ export function writeContext(key: string, md: string): string {
   mkdirSync(getDir(), { recursive: true });
   writeFileSync(fileFor(key), normalizeContext(md), "utf8");
   return fileFor(key);
+}
+
+// Forget a project's background context. whale-local only — never touches the
+// repo or krill. Returns false if there was nothing stored for the key.
+export function deleteContext(key: string): boolean {
+  const f = fileFor(key);
+  if (!existsSync(f)) return false;
+  unlinkSync(f);
+  return true;
 }
 
 export function listContextKeys(): string[] {

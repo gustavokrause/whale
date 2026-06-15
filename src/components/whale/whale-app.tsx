@@ -459,6 +459,7 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
   const [sel, setSel] = useState<string | null>(null);
   const [md, setMd] = useState("");
   const { push } = useToast();
+  const dlg = useDialog();
 
   const load = useCallback(async () => {
     const k: string[] = (await j("/api/context")).keys || [];
@@ -479,6 +480,15 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
     const r = await post("/api/onboard", { key });
     if (r.running) push({ variant: "info", title: `${refresh ? "Auditing" : "Onboarding"} ${key}…`, description: "running in background — context updates when it lands" });
     else if (r.error) push({ variant: "danger", title: "Failed", description: r.error });
+    load();
+  };
+  const del = async (k: string) => {
+    if (!(await dlg.confirm({ title: `Delete context for ${k}?`, description: "Permanently removes whale's background context for this project. Does not touch krill or the repo.", confirmLabel: "Delete", confirmVariant: "danger" }))) return;
+    await withBusy(`Deleting ${k}`, j(`/api/context?key=${encodeURIComponent(k)}`, { method: "DELETE" }));
+    if (sel === k) {
+      setSel(null);
+      setMd("");
+    }
     load();
   };
   const onboardOrSeed = async () => {
@@ -550,6 +560,9 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
                 <button className="px-2.5 py-1.5 text-sm text-text hover:text-primary" onClick={() => view(k)}>{k}</button>
                 <button className="px-2 py-1.5 text-text-2 hover:text-text border-l border-border disabled:opacity-50" title="Re-audit (refresh context)" onClick={() => audit(k, true)} disabled={isJob("onboard", k)}>
                   {isJob("onboard", k) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
+                </button>
+                <button className="px-2 py-1.5 text-text-2 hover:text-danger border-l border-border disabled:opacity-50" title="Delete context" onClick={() => del(k)} disabled={isJob("onboard", k)}>
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </span>
             ))}
