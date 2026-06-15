@@ -145,7 +145,7 @@ export function WhaleApp() {
           ))}
         </nav>
 
-        <main className="border border-border rounded-lg bg-bg dark:bg-surface p-5">
+        <main className="border border-border rounded-b-lg bg-bg dark:bg-surface p-5">
         {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
             switch, like the original display:none UI. Polling is gated by `active`. */}
         <div hidden={tab !== "inbox"}>
