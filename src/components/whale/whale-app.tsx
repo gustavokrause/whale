@@ -128,21 +128,24 @@ export function WhaleApp() {
         </button>
       </header>
 
-      <nav className="flex gap-1 px-5 pt-3">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => go(t)}
-            className={`px-3.5 py-2 rounded-t-lg text-sm capitalize ${
-              tab === t ? "text-text bg-surface border border-border border-b-0" : "text-text-2"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </nav>
+      <div className="max-w-3xl mx-auto px-5 pt-3">
+        <nav className="flex gap-1">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              onClick={() => go(t)}
+              className={`px-4 py-2 rounded-t-lg text-sm capitalize border border-b-0 ${
+                tab === t
+                  ? "text-white border-border bg-gradient-to-b from-primary to-surface -mb-px relative z-10"
+                  : "text-text-2 border-transparent hover:text-text"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </nav>
 
-      <main className="max-w-3xl mx-auto p-5">
+        <main className="border border-border rounded-lg bg-surface p-5">
         {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
             switch, like the original display:none UI. Polling is gated by `active`. */}
         <div hidden={tab !== "inbox"}>
@@ -157,7 +160,8 @@ export function WhaleApp() {
         <div hidden={tab !== "settings"}>
           <SettingsTab withBusy={withBusy} onSaved={loadStatus} rev={rev} />
         </div>
-      </main>
+        </main>
+      </div>
 
       <style>{`@keyframes ind{0%{left:-30%}100%{left:100%}}`}</style>
     </div>
