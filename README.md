@@ -81,19 +81,37 @@ triage stays deterministic. Set `CLAUDE_BIN` if `claude` isn't on PATH.
 
 The `WHALE_BYPASS` dial sets how far a task runs before it reaches you:
 
-| Dial | low risk | medium | high / self-edit |
-|---|---|---|---|
-| `conservative` (default) | review | review | review |
-| `balanced` | skip plan review | review | review |
-| `aggressive` | skip plan review **+ auto_publish** | skip plan review | review |
+| Dial | low risk | medium | high | self-edit |
+|---|---|---|---|---|
+| `conservative` (default) | review | review | review | review |
+| `balanced` | skip plan review | review | review | review |
+| `aggressive` | **auto-finish** | skip plan review | review | review |
+| `autonomous` | **auto-finish** | **auto-finish** | review | review |
+| `ludicrous` | **auto-finish** | **auto-finish** | **auto-finish** | review |
 
-- **auto-finish** (low + aggressive) sets krill `auto_publish`; krill only honors it
-  when the project also has `allow_auto_finish=true` (double-gated, AI review stays on).
+- **auto-finish** sets krill `auto_publish`; krill only honors it when the project
+  also has `allow_auto_finish=true` (double-gated, AI review stays on). Ludicrous
+  auto-finishes **every tier** — including high-risk (migrations/auth/deploy) — so
+  it's the reckless setting; only the self-edit guard still stops it.
+- **Warn, don't arm**: pushing auto-finish tasks to a project whose krill
+  `allow_auto_finish` is OFF surfaces a warning (whale never patches krill).
 - **Self-edit guard** (`WHALE_PROTECTED`, default `whale,krill`): tasks targeting the
-  orchestrator itself are **always 🔴, never bypass**, any dial.
+  orchestrator itself are **always 🔴, never bypass/auto**, any dial.
 
 Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PROJECTS=1`
-(propose new projects — creation stays human-gated), `KRILL_URL`, `PERSONAS_DIR`.
+(propose new projects — creation stays human-gated), `WHALE_PLAN_FILE_ACCESS=1`
+(planner reads the project repo, for file-referencing dumps), `WHALE_NO_MCP=1`
+(load zero MCP servers if one misbehaves), `KRILL_URL`, `PERSONAS_DIR`.
+
+### Other capabilities
+
+- **Pre-send review** — Push to krill (single / dump-group / project batch) opens a
+  modal to review + override each task's settings, and warns before sending.
+- **Proposed grouping** — proposals group by source dump in execution order, with
+  short handles, `← depends on` / `→ unblocks` refs, and `TEMP-` ids (→ krill id on push).
+- **Blocker queue** — if planning hits something interactive it can't answer headless
+  (MCP auth, CLI login) it pauses and files a blocker; clear it to resume the plan.
+- **Plan failures** surface on the dump (no more silent `raw`).
 
 ### Editing config at runtime
 

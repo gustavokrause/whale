@@ -43,9 +43,12 @@ list and unlock self-edit auto-finish. Concretely:
 - Enforce a **hard floor**: `whale` and `krill` are always in the set even if env
   omits them (union, not replace).
 - The settings tab shows it **read-only** ("env-locked — self-edit guard").
-- The `aggressive` dial stays UI-editable (it's the point), because auto-finish is
+- The bypass dial stays UI-editable (it's the point) — now five values:
+  `conservative · balanced · aggressive · autonomous · ludicrous`. Auto-finish is
   already **double-gated** elsewhere (krill `allow_auto_finish` + whale arm-time
-  double-confirm). The protected floor is the thing that must not move from the UI.
+  confirm). The protected floor is the thing that must not move from the UI.
+- `plan_file_access` (UI toggle) lets planning read the project repo (Read/Grep/Glob)
+  for file-referencing dumps; off = prompt-only.
 
 ## Precedence model
 
