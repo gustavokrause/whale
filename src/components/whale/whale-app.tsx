@@ -22,6 +22,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useDialog } from "@/components/ui/dialog-provider";
 import { PushReview, type PushEdit } from "@/components/whale/push-review";
+import { BlockersBanner } from "@/components/whale/blockers-banner";
 import { WhaleIcon } from "@/components/app/whale-icon";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
@@ -253,6 +254,8 @@ export function WhaleApp() {
         </header>
 
         <main className="flex-1 overflow-y-auto px-6 py-6">
+          {/* Unblock queue — paused units (MCP auth / CLI login) needing attention. */}
+          <BlockersBanner rev={rev} />
           {/* keep all tabs mounted (hidden) so typed text / selections survive a tab
               switch, like the original display:none UI. Polling is gated by `active`. */}
           <div hidden={tab !== "inbox"}>

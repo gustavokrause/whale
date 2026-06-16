@@ -8,6 +8,13 @@
       "when": 1781541314412,
       "tag": "0000_sleepy_nighthawk",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1781575557370,
+      "tag": "0001_awesome_lady_vermin",
+      "breakpoints": true
     }
   ]
 }

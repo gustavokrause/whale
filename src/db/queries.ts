@@ -10,9 +10,11 @@ import {
   inboxEntries,
   proposedTasks,
   config as configTable,
+  blockers,
   type InboxEntry,
   type ProposedTask,
   type ConfigRow,
+  type Blocker,
 } from "./schema";
 
 /* ---- inbox ---- */
@@ -167,4 +169,63 @@ export function writeConfig(fields: Partial<typeof configTable.$inferInsert>): C
     db.update(configTable).set(rest).where(eq(configTable.id, 1)).run();
   broadcast();
   return readConfig();
+}
+
+/* ---- blockers (the unblock queue) ---- */
+
+export function listBlockers(status?: string): Blocker[] {
+  const rows = db.select().from(blockers).orderBy(desc(blockers.created_at)).all();
+  return status ? rows.filter((b) => b.status === status) : rows;
+}
+
+export function getBlocker(id: string): Blocker | undefined {
+  return db.select().from(blockers).where(eq(blockers.id, id)).get();
+}
+
+/**
+ * File a blocker. Deduped on (kind, trigger_kind, trigger_ref) while still open —
+ * a job that keeps re-blocking the same unit refreshes one row, not a pile.
+ */
+export function addBlocker(b: {
+  kind: string;
+  trigger_kind: string;
+  trigger_ref: string;
+  summary: string;
+  detail?: string;
+  action_url?: string | null;
+  source?: string;
+}): Blocker {
+  const existing = listBlockers("open").find(
+    (x) => x.kind === b.kind && x.trigger_kind === b.trigger_kind && x.trigger_ref === b.trigger_ref,
+  );
+  if (existing) {
+    db.update(blockers)
+      .set({ summary: b.summary, detail: b.detail ?? "", action_url: b.action_url ?? null, created_at: Date.now() })
+      .where(eq(blockers.id, existing.id))
+      .run();
+    broadcast();
+    return getBlocker(existing.id)!;
+  }
+  const row = {
+    id: randomUUID(),
+    source: b.source ?? "whale",
+    kind: b.kind,
+    status: "open",
+    trigger_kind: b.trigger_kind,
+    trigger_ref: b.trigger_ref,
+    summary: b.summary,
+    detail: b.detail ?? "",
+    action_url: b.action_url ?? null,
+    created_at: Date.now(),
+    resolved_at: null,
+  };
+  db.insert(blockers).values(row).run();
+  broadcast();
+  return row as Blocker;
+}
+
+export function resolveBlocker(id: string, status: "resolved" | "dismissed" = "resolved"): Blocker | undefined {
+  db.update(blockers).set({ status, resolved_at: Date.now() }).where(eq(blockers.id, id)).run();
+  broadcast();
+  return getBlocker(id);
 }

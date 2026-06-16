@@ -50,6 +50,28 @@ export const proposedTasks = sqliteTable(
   (t) => ({ statusIdx: index("proposed_status_idx").on(t.status) }),
 );
 
+// Blocker queue: an automated unit (plan job, …) hit something interactive it
+// can't answer headless (MCP auth, CLI login, a permission prompt). It pauses,
+// files a blocker with its trigger context, and resumes (re-runs the unit) once
+// a human clears it.
+export const blockers = sqliteTable(
+  "blockers",
+  {
+    id: text("id").primaryKey(),
+    source: text("source").notNull().default("whale"),
+    kind: text("kind").notNull(), // mcp_auth | cli_login | permission | other
+    status: text("status").notNull().default("open"), // open | resolved | dismissed
+    trigger_kind: text("trigger_kind").notNull(), // plan | route | refine | ...
+    trigger_ref: text("trigger_ref").notNull(), // job key / task id / project key
+    summary: text("summary").notNull(),
+    detail: text("detail").notNull().default(""),
+    action_url: text("action_url"),
+    created_at: integer("created_at").notNull(),
+    resolved_at: integer("resolved_at"),
+  },
+  (t) => ({ statusIdx: index("blockers_status_idx").on(t.status) }),
+);
+
 // Runtime config overrides (singleton id=1). NULL column = fall back to env.
 // The self-edit guard (WHALE_PROTECTED) is intentionally NOT here — env-only.
 export const config = sqliteTable("config", {
@@ -65,3 +87,4 @@ export const config = sqliteTable("config", {
 export type InboxEntry = typeof inboxEntries.$inferSelect;
 export type ProposedTask = typeof proposedTasks.$inferSelect;
 export type ConfigRow = typeof config.$inferSelect;
+export type Blocker = typeof blockers.$inferSelect;

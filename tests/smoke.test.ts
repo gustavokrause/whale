@@ -12,14 +12,18 @@ import {
   addEntry, listEntries, rawEntries, markEntries,
   addProposed, listProposed, updateProposed, getProposed,
   readConfig, writeConfig, pendingRequests,
+  addBlocker, listBlockers, resolveBlocker,
 } from "../src/db/queries";
+import { blockers } from "../src/db/schema";
 import { triage, flowPreview, plan } from "../src/lib/stages";
 import { push, pushBatch, refine } from "../src/lib/pipeline";
+import { classifyBlock } from "../src/lib/runner";
 
 function resetDb() {
   db.delete(proposedTasks).run();
   db.delete(inboxEntries).run();
   db.delete(configTable).run();
+  db.delete(blockers).run();
 }
 
 const stubTeam = { risk: { safeWords: [] as string[] } } as const;
@@ -178,4 +182,27 @@ test("config: DB overrides win over env; protected stays env-only", () => {
 
   setConfigOverrides(null); // reset shared module state
   resetDb();
+});
+
+test("blocker detection: auth/login prompts classify, ordinary prose doesn't", () => {
+  const supa = classifyBlock("Open this URL in your browser to authorize Supabase access:\n\nhttps://api.supabase.com/v1/oauth/authorize?x=1");
+  assert.equal(supa?.kind, "mcp_auth", "supabase OAuth -> mcp_auth");
+  assert.match(supa?.actionUrl ?? "", /^https:\/\/api\.supabase\.com/, "captures the URL");
+  assert.equal(classifyBlock("Not logged in · Please run /login")?.kind, "cli_login");
+  assert.equal(classifyBlock("No filesystem access. Paste the cron logs and I'll plan."), null, "model asking for data is NOT a blocker");
+});
+
+test("blocker queue: file (deduped), list open, resolve", () => {
+  resetDb();
+  const a = addBlocker({ kind: "mcp_auth", trigger_kind: "plan", trigger_ref: "mv", summary: "needs auth", action_url: "https://x" });
+  assert.equal(listBlockers("open").length, 1);
+  // same (kind, trigger) while open -> refresh, not a duplicate
+  const b = addBlocker({ kind: "mcp_auth", trigger_kind: "plan", trigger_ref: "mv", summary: "needs auth (again)" });
+  assert.equal(b.id, a.id, "deduped to the same row");
+  assert.equal(listBlockers("open").length, 1);
+  // a different unit -> separate blocker
+  addBlocker({ kind: "mcp_auth", trigger_kind: "plan", trigger_ref: "arqtrack", summary: "other" });
+  assert.equal(listBlockers("open").length, 2);
+  resolveBlocker(a.id, "resolved");
+  assert.equal(listBlockers("open").length, 1, "resolved drops out of open");
 });
