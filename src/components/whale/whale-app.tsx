@@ -812,6 +812,7 @@ const DIALS = [
   { id: "conservative", label: "Conservative", blurb: "Nothing skips you. Every proposed task waits for your plan review before krill builds it." },
   { id: "balanced", label: "Balanced", blurb: "Trivial work flows on its own; anything with real risk still waits for your review." },
   { id: "aggressive", label: "Aggressive", blurb: "Trivial work runs all the way to merged, unattended. Medium risk skips plan review. High risk still waits." },
+  { id: "autonomous", label: "Autonomous", blurb: "Trusted routine work — low AND medium — runs to merged, unattended. High risk (migrations, auth, deploy, payments) still waits for your plan review. Self-edit always waits." },
   { id: "ludicrous", label: "Ludicrous", blurb: "Every tier — including high risk — runs to merged, unattended. Only self-edit (whale/krill) still stops you. Needs allow_auto_finish on the krill project, or tasks stop at review (whale warns)." },
 ] as const;
 
@@ -833,6 +834,7 @@ const TIERS = [
 // reviews and the dial only moves low/medium.
 function outcomeFor(dial: string, tier: string): Outcome {
   if (dial === "ludicrous") return "auto";
+  if (dial === "autonomous") return tier === "high" ? "review" : "auto"; // low+medium auto
   if (tier === "high") return "review";
   if (tier === "low") return dial === "aggressive" ? "auto" : dial === "balanced" ? "bypass" : "review";
   return dial === "aggressive" ? "bypass" : "review"; // medium

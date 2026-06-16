@@ -121,19 +121,24 @@ export function triage(
   else if (LOW_RE.test(text)) risk_tier = "low";
 
   const isLudicrous = dial === "ludicrous";
+  // Autonomous: auto-finish low + medium, but high still gets full plan review.
+  // Ludicrous: auto-finish EVERY tier. Both keep the self-edit floor (whale/krill
+  // protected tasks never auto/bypass — the runaway-loop guard).
+  const isAutonomous = dial === "autonomous";
 
-  // Ludicrous auto-finishes EVERY tier; the only hard exclusion is self-edit
-  // (the runaway-loop floor — whale/krill protected tasks never auto/bypass).
   let bypass = false;
   if (!isSelfEdit) {
-    if (isLudicrous) bypass = true; // plan review skipped at every tier (auto anyway)
-    else if (risk_tier === "low") bypass = dial === "balanced" || dial === "aggressive";
-    else if (risk_tier === "medium") bypass = dial === "aggressive";
+    if (isLudicrous) bypass = true; // skip plan review at every tier (auto anyway)
+    else if (risk_tier === "low") bypass = dial === "balanced" || dial === "aggressive" || isAutonomous;
+    else if (risk_tier === "medium") bypass = dial === "aggressive" || isAutonomous;
+    // high: only Ludicrous skips review; Autonomous keeps high fully gated.
   }
 
   const auto_publish =
     !isSelfEdit &&
-    (isLudicrous || (risk_tier === "low" && dial === "aggressive"));
+    (isLudicrous ||
+      (isAutonomous && risk_tier !== "high") ||
+      (risk_tier === "low" && dial === "aggressive"));
 
   const priority = risk_tier === "high" ? "P1" : risk_tier === "low" ? "P3" : "P2";
   const mode = DEV_RE.test(text) ? "dev" : "non-dev";
