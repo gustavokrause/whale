@@ -619,6 +619,13 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   const [projects, setProjects] = useState<string[]>([]);
   const [review, setReview] = useState<{ tasks: EnrichedTask[]; key: string; kind: "single" | "batch" | "group"; sourceEntryId?: string } | null>(null);
   const [sending, setSending] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (id: string) =>
+    setCollapsedGroups((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
   const { push } = useToast();
   const dlg = useDialog();
 
@@ -801,14 +808,20 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
             {dumpGroups(grouped[key]).map((g) => (
               <div key={g.id} className="border-b border-border last:border-b-0">
                 <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-surface-2/40">
-                  <span className="text-xs text-text-2 min-w-0 truncate inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(g.id)}
+                    className="text-xs text-text-2 min-w-0 truncate inline-flex items-center gap-1 hover:text-text"
+                    title={collapsedGroups.has(g.id) ? "Expand" : "Collapse"}
+                  >
+                    <span className="shrink-0 text-text-3 w-3">{collapsedGroups.has(g.id) ? "▸" : "▾"}</span>
                     {g.id === "__none__" ? (
                       "Ungrouped"
                     ) : (
                       <><Pencil className="h-3 w-3 shrink-0" /> {(g.text ?? "dump").slice(0, 90)}</>
                     )}
                     <span className="text-text-3">· {g.tasks.length} task{g.tasks.length === 1 ? "" : "s"}</span>
-                  </span>
+                  </button>
                   {g.id !== "__none__" && pushable(g.tasks) > 0 && (
                     <button
                       className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-2.5 !py-1 shrink-0`}
@@ -819,6 +832,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                     </button>
                   )}
                 </div>
+            {!collapsedGroups.has(g.id) && (
             <ul className="divide-y divide-border">
               {g.tasks.map((p) => (
                 <li key={p.id} className="px-3 py-2.5">
@@ -904,6 +918,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                 </li>
               ))}
             </ul>
+            )}
               </div>
             ))}
           </div>
