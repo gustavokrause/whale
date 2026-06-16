@@ -110,6 +110,9 @@ type ProposedInput = {
   bypass?: boolean;
   auto_publish?: boolean;
   deps?: string[];
+  plan_run_id?: string | null;
+  source_entry_id?: string | null;
+  label?: string | null;
 };
 
 export function addProposed(t: ProposedInput): ProposedTask {
@@ -127,6 +130,9 @@ export function addProposed(t: ProposedInput): ProposedTask {
       bypass: !!t.bypass,
       auto_publish: !!t.auto_publish,
       deps: JSON.stringify(Array.isArray(t.deps) ? t.deps : []),
+      label: t.label ?? null,
+      plan_run_id: t.plan_run_id ?? null,
+      source_entry_id: t.source_entry_id ?? null,
       status: "proposed",
       created_at: Date.now(),
     })

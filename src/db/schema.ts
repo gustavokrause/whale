@@ -42,6 +42,13 @@ export const proposedTasks = sqliteTable(
     bypass: integer("bypass", { mode: "boolean" }).notNull().default(false),
     auto_publish: integer("auto_publish", { mode: "boolean" }).notNull().default(false),
     deps: text("deps").notNull().default("[]"), // JSON: sibling task names (B2)
+    // Short handle (1-3 words, e.g. "stripe", "migration") for compact tracking
+    // and dependency labels in the UI.
+    label: text("label"),
+    // Provenance: which Plan click produced this task, and which source dump it
+    // primarily serves. deps can still cross dumps within a run.
+    plan_run_id: text("plan_run_id"),
+    source_entry_id: text("source_entry_id"),
     refine_log: text("refine_log").notNull().default("[]"), // JSON: refine turns (B3)
     status: text("status").notNull().default("proposed"), // proposed|approved|rejected|pushed|push_failed
     krill_task_id: text("krill_task_id"),

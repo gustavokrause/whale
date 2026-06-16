@@ -22,6 +22,20 @@
       "when": 1781582433612,
       "tag": "0002_conscious_saracen",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1781609341708,
+      "tag": "0003_clever_the_anarchist",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1781612945880,
+      "tag": "0004_safe_red_wolf",
+      "breakpoints": true
     }
   ]
 }

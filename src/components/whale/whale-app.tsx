@@ -611,13 +611,13 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
   );
 }
 
-type EnrichedTask = ProposedTask & { krill_status?: string | null };
+type EnrichedTask = ProposedTask & { krill_status?: string | null; source_entry_text?: string | null };
 
 function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number }) {
   const [items, setItems] = useState<EnrichedTask[]>([]);
   const [showRej, setShowRej] = useState(false);
   const [projects, setProjects] = useState<string[]>([]);
-  const [review, setReview] = useState<{ tasks: EnrichedTask[]; key: string; kind: "single" | "batch" } | null>(null);
+  const [review, setReview] = useState<{ tasks: EnrichedTask[]; key: string; kind: "single" | "batch" | "group"; sourceEntryId?: string } | null>(null);
   const [sending, setSending] = useState(false);
   const { push } = useToast();
   const dlg = useDialog();
@@ -634,10 +634,12 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
       }
       let r;
       if (review.kind === "single") r = await post(`/api/proposed/${review.tasks[0].id}/push`, { confirm: true });
+      else if (review.kind === "group") r = await post("/api/proposed/push-group", { key: review.key, source_entry_id: review.sourceEntryId, confirm: true });
       else r = await post("/api/proposed/push-batch", { key: review.key, confirm: true });
       if (r.error) push({ variant: "danger", title: "Push failed", description: r.error });
-      else if (review.kind === "batch") push({ variant: "success", title: `Pushed ${r.pushed}/${r.total || r.pushed} to krill` });
-      else push({ variant: "success", title: "Pushed to krill" });
+      else if (review.kind === "single") push({ variant: "success", title: "Pushed to krill" });
+      else push({ variant: "success", title: `Pushed ${r.pushed}/${r.total || r.pushed} to krill` });
+      if (r.warning) push({ variant: "warning", title: "Heads up", description: r.warning });
     } finally {
       setSending(false);
       setReview(null);
@@ -712,6 +714,54 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   const pushable = (list: EnrichedTask[]) =>
     list.filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)).length;
   const dis = "disabled:opacity-40 disabled:cursor-not-allowed";
+  // Execution order: a task lands after every dep it has in the set (topo sort).
+  const topoSort = (list: EnrichedTask[]) => {
+    const byName = new Map(list.map((t) => [t.name, t]));
+    const seen = new Set<string>();
+    const out: EnrichedTask[] = [];
+    const visit = (t: EnrichedTask) => {
+      if (seen.has(t.name)) return;
+      seen.add(t.name);
+      for (const d of JSON.parse(t.deps || "[]") as string[]) {
+        const dep = byName.get(d);
+        if (dep) visit(dep);
+      }
+      out.push(t);
+    };
+    for (const t of list) visit(t);
+    return out;
+  };
+  // Sub-group a project's tasks by source dump (plan run), each in execution order.
+  const dumpGroups = (list: EnrichedTask[]) => {
+    const m = new Map<string, EnrichedTask[]>();
+    for (const t of list) {
+      const k = t.source_entry_id ?? "__none__";
+      if (!m.has(k)) m.set(k, []);
+      m.get(k)!.push(t);
+    }
+    return [...m.entries()].map(([id, ts]) => ({
+      id,
+      text: ts.find((t) => t.source_entry_text)?.source_entry_text ?? null,
+      tasks: topoSort(ts),
+    }));
+  };
+  // task name -> its dump (to flag cross-dump deps) and -> its short label.
+  const nameToDump = new Map(items.map((t) => [t.name, t.source_entry_id ?? "__none__"]));
+  const shortName = (s: string) => (s.length > 22 ? s.slice(0, 21) + "…" : s);
+  const nameToTask = new Map(items.map((t) => [t.name, t]));
+  // Reference a dep/dependent by its stable id (krill id once pushed, else TEMP)
+  // + its handle, so even repeated labels stay unambiguous.
+  const refOf = (name: string) => {
+    const t = nameToTask.get(name);
+    if (!t) return shortName(name);
+    const id = t.krill_task_id ?? `TEMP-${t.id.slice(0, 4).toUpperCase()}`;
+    return `${id} ${t.label || shortName(name)}`;
+  };
+  // Reverse edges: task name -> names of tasks that depend on it (it unblocks).
+  const dependents = new Map<string, string[]>();
+  for (const t of items)
+    for (const d of JSON.parse(t.deps || "[]") as string[])
+      dependents.set(d, [...(dependents.get(d) ?? []), t.name]);
 
   return (
     <section>
@@ -748,9 +798,41 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                 Push batch <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </div>
+            {dumpGroups(grouped[key]).map((g) => (
+              <div key={g.id} className="border-b border-border last:border-b-0">
+                <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-surface-2/40">
+                  <span className="text-xs text-text-2 min-w-0 truncate inline-flex items-center gap-1">
+                    {g.id === "__none__" ? (
+                      "Ungrouped"
+                    ) : (
+                      <><Pencil className="h-3 w-3 shrink-0" /> {(g.text ?? "dump").slice(0, 90)}</>
+                    )}
+                    <span className="text-text-3">· {g.tasks.length} task{g.tasks.length === 1 ? "" : "s"}</span>
+                  </span>
+                  {g.id !== "__none__" && pushable(g.tasks) > 0 && (
+                    <button
+                      className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-2.5 !py-1 shrink-0`}
+                      onClick={() => setReview({ tasks: g.tasks.filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "group", sourceEntryId: g.id })}
+                      title="Push this dump's tasks to krill (dependency-ordered)"
+                    >
+                      Push group <ArrowRight className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
             <ul className="divide-y divide-border">
-              {grouped[key].map((p) => (
+              {g.tasks.map((p) => (
                 <li key={p.id} className="px-3 py-2.5">
+                  <span
+                    className={`font-mono text-[10px] px-1.5 py-0.5 rounded mr-1.5 align-middle ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
+                    title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
+                  >
+                    {p.krill_task_id ?? `TEMP-${p.id.slice(0, 4).toUpperCase()}`}
+                  </span>
+                  {p.label ? (
+                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary mr-2 align-middle">
+                      {p.label}
+                    </span>
+                  ) : null}
                   <b>{p.name}</b>
                   {p.description && <div className="text-xs text-text-2 mt-1">{p.description}</div>}
                   <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
@@ -762,6 +844,31 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                     <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
                     <span className="px-2 rounded-full bg-border">{p.status}</span>
                     <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
+                    {(() => {
+                      const deps = JSON.parse(p.deps || "[]") as string[];
+                      if (!deps.length) return null;
+                      const cross = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
+                      return (
+                        <span
+                          className={`px-2 rounded-full ${cross ? "bg-info/15 text-info" : "bg-border"}`}
+                          title={`runs after: ${deps.join(", ")}`}
+                        >
+                          ← depends on: {deps.map(refOf).join(" + ")}{cross ? " · x-dump" : ""}
+                        </span>
+                      );
+                    })()}
+                    {(() => {
+                      const blocks = dependents.get(p.name) ?? [];
+                      if (!blocks.length) return null;
+                      return (
+                        <span
+                          className="px-2 rounded-full bg-border text-text-3"
+                          title={`unblocks: ${blocks.join(", ")}`}
+                        >
+                          → unblocks: {blocks.map(refOf).join(" + ")}
+                        </span>
+                      );
+                    })()}
                     {p.status === "pushed" && p.krill_status && (
                       <span className={`px-2 rounded-full ${p.krill_status === "DONE" ? "bg-success/20 text-success" : p.krill_status === "CANCELED" ? "bg-muted/20 text-muted" : "bg-info/20 text-info"}`}>
                         krill: {p.krill_status}
@@ -797,6 +904,8 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                 </li>
               ))}
             </ul>
+              </div>
+            ))}
           </div>
         ))
       )}

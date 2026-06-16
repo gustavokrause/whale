@@ -206,3 +206,15 @@ test("blocker queue: file (deduped), list open, resolve", () => {
   resolveBlocker(a.id, "resolved");
   assert.equal(listBlockers("open").length, 1, "resolved drops out of open");
 });
+
+test("plan attributes tasks to their source dump + a shared plan run", async () => {
+  resetDb();
+  const a = addEntry({ text: "add CSV export", projectHint: "ztest" });
+  const b = addEntry({ text: "add dark mode", projectHint: "ztest" });
+  const proposed = await plan(stubTeam as never, "ztest");
+  assert.equal(proposed.length, 2, "two dumps -> two tasks (stub)");
+  const runIds = new Set(proposed.map((t) => t.plan_run_id));
+  assert.equal(runIds.size, 1, "one plan run id for the click");
+  const srcIds = new Set(proposed.map((t) => t.source_entry_id));
+  assert.deepEqual([...srcIds].sort(), [a.id, b.id].sort(), "each task attributed to its dump");
+});

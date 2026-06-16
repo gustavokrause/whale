@@ -2,6 +2,7 @@
 // real path that uses the persona prompts loaded from ai-team.
 
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { isReal, config } from "./config";
 import { completeJSON } from "./runner";
 import { readContext } from "./context-store";
@@ -21,6 +22,8 @@ export type TaskDraft = {
   priority?: string;
   mode?: string;
   depends_on?: string[];
+  source?: number; // index of the WORK REQUEST this task primarily serves
+  label?: string; // short handle (1-3 words) for tracking + dep labels
 };
 
 export type TriageResult = {
@@ -51,15 +54,27 @@ export async function plan(team: Team, key: string): Promise<ProposedTask[]> {
   if (!reqs.length) return [];
   const context = readContext(key); // background reference (may be empty if not onboarded)
   const drafts = isReal() ? await planReal(team, key, context, reqs) : planStub(key, reqs);
-  const proposed = drafts.map((t) => triageAndStore(team, key, t));
+  // Labels are the readable handle used in dep badges — keep them unique within
+  // the run so they're unambiguous (second "payment" -> "payment-2").
+  const usedLabels = new Map<string, number>();
+  for (const t of drafts) {
+    const base = (t.label || "").trim().toLowerCase();
+    if (!base) continue;
+    const seen = usedLabels.get(base);
+    usedLabels.set(base, (seen ?? 0) + 1);
+    t.label = seen ? `${base}-${seen + 1}` : base;
+  }
+  // One id per Plan click; each task is attributed to the dump it serves.
+  const runId = randomUUID();
+  const proposed = drafts.map((t) => triageAndStore(team, key, t, runId, reqs));
   markEntries(reqs.map((r) => r.id), "planned");
   return proposed;
 }
 
 function planStub(key: string, reqs: InboxEntry[]): TaskDraft[] {
-  return reqs.map((r) => {
+  return reqs.map((r, i) => {
     const t = r.text.replace(/\n+/g, " ").trim();
-    return { name: t.length > 70 ? t.slice(0, 67) + "..." : t, description: `Requested for ${key}.` };
+    return { name: t.length > 70 ? t.slice(0, 67) + "..." : t, description: `Requested for ${key}.`, source: i };
   });
 }
 
@@ -74,8 +89,10 @@ async function planReal(team: Team, key: string, context: string, reqs: InboxEnt
     `(background reference — use it to scope and clarify; do NOT restate it and do NOT invent work ` +
     `beyond the requests). Augusto kills scope creep. ` +
     `Sequence work that builds on other tasks: set depends_on to the exact names of ` +
-    `the sibling tasks that must finish first ([] if independent). ` +
-    `Each task: {name, description, priority(P0..P3), mode(dev|non-dev), depends_on: string[]}.`;
+    `the sibling tasks that must finish first ([] if independent) — deps MAY cross requests. ` +
+    `Attribute each task to the WORK REQUEST it primarily serves via "source" (the [n] index). ` +
+    `Give each a short "label": a 1-3 word lowercase handle to track it by (e.g. "stripe", "migration", "trial-ui"); deps reference these. ` +
+    `Each task: {name, description, priority(P0..P3), mode(dev|non-dev), depends_on: string[], source: number, label: string}.`;
   // Optional repo file-read access: scope the planner to the project's folder so
   // requests that reference files ("read docs/X.md") can be grounded.
   let cwd: string | undefined;
@@ -96,8 +113,8 @@ async function planReal(team: Team, key: string, context: string, reqs: InboxEnt
   const user =
     `PROJECT: ${key}\n\n` +
     `PROJECT CONTEXT (background, reference only):\n${context || "(not onboarded — no background context)"}\n\n` +
-    `WORK REQUESTS:\n${reqs.map((r) => `- ${r.text}`).join("\n")}\n\n` +
-    `Return a JSON array of proposed tasks (one or more per request as needed).${fileNote}`;
+    `WORK REQUESTS:\n${reqs.map((r, i) => `[${i}] ${r.text}`).join("\n")}\n\n` +
+    `Return a JSON array of proposed tasks (one or more per request as needed). Tag each with "source" = the [n] it serves.${fileNote}`;
   const out = await completeJSON<TaskDraft[] | { tasks: TaskDraft[] }>({
     system,
     user,
@@ -108,10 +125,22 @@ async function planReal(team: Team, key: string, context: string, reqs: InboxEnt
   return Array.isArray(out) ? out : out.tasks || [];
 }
 
-function triageAndStore(team: Team, key: string, t: TaskDraft): ProposedTask {
+function triageAndStore(
+  team: Team,
+  key: string,
+  t: TaskDraft,
+  runId: string,
+  reqs: InboxEntry[],
+): ProposedTask {
   const tri = triage(team, { ...t, project_key: key });
+  // Map the planner's source index to the dump; fall back to the first dump.
+  const srcEntry =
+    typeof t.source === "number" && reqs[t.source] ? reqs[t.source] : reqs[0];
   return addProposed({
     project_key: key,
+    plan_run_id: runId,
+    source_entry_id: srcEntry?.id ?? null,
+    label: t.label?.trim() || null,
     name: t.name,
     description: t.description || "",
     priority: t.priority || tri.priority,

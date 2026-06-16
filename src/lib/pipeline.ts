@@ -130,15 +130,40 @@ export async function routeEntry(team: Team, entryId: string) {
   return { ...r, lane: r.dest, entry };
 }
 
-/** Batch push (B2): push pushable tasks for a project in dependency order. */
+/** Batch push (B2): push all pushable tasks for a project in dependency order. */
 export async function pushBatch(team: Team, projectKey: string, { confirm = false }: { confirm?: boolean } = {}) {
   void team;
-  if ((projectKey || "").toLowerCase() === "global")
-    return { ok: false, error: "'global' is not a project — reassign tasks first" };
-
   const items = listProposed().filter(
     (t) => t.project_key === projectKey && ["proposed", "approved", "push_failed"].includes(t.status),
   );
+  return pushItems(projectKey, items, { confirm });
+}
+
+/** Group push: push one dump's tasks (a plan run's source_entry_id), dep-ordered. */
+export async function pushGroup(
+  projectKey: string,
+  sourceEntryId: string,
+  { confirm = false }: { confirm?: boolean } = {},
+) {
+  const items = listProposed().filter(
+    (t) =>
+      t.project_key === projectKey &&
+      t.source_entry_id === sourceEntryId &&
+      ["proposed", "approved", "push_failed"].includes(t.status),
+  );
+  return pushItems(projectKey, items, { confirm });
+}
+
+// Push a set of proposed tasks, dependency-ordered. Deps resolve against this
+// batch AND any already-pushed sibling (by name → krill_task_id), so cross-dump
+// deps hold when the upstream was pushed earlier; unresolved ones are warned.
+async function pushItems(
+  projectKey: string,
+  items: ProposedTask[],
+  { confirm = false }: { confirm?: boolean } = {},
+) {
+  if ((projectKey || "").toLowerCase() === "global")
+    return { ok: false, error: "'global' is not a project — reassign tasks first" };
   if (!items.length) return { ok: true, pushed: 0, results: [] };
 
   const autoFin = items.filter((t) => t.auto_publish && !isProtected(t.project_key));
@@ -158,12 +183,26 @@ export async function pushBatch(team: Team, projectKey: string, { confirm = fals
     ? await autoFinishWarning(projectId, projectKey, autoFin.length)
     : undefined;
 
+  // Already-pushed siblings in this project (for cross-batch/dump dep resolution).
+  const pushedByName = new Map(
+    listProposed()
+      .filter((t) => t.project_key === projectKey && t.krill_task_id)
+      .map((t) => [t.name, t.krill_task_id as string]),
+  );
+
   const byName = new Map(items.map((t) => [t.name, t]));
   const ordered = topoByDeps(items, byName);
-  const nameToId: Record<string, string | null> = {};
+  const nameToId: Record<string, string> = {};
   const results: { name: string; id?: string | null; depends_on?: string[]; error?: string }[] = [];
+  const unresolvedDeps = new Set<string>();
   for (const t of ordered) {
-    const depIds = (JSON.parse(t.deps || "[]") as string[]).map((n) => nameToId[n]).filter(Boolean) as string[];
+    const deps = JSON.parse(t.deps || "[]") as string[];
+    const depIds: string[] = [];
+    for (const n of deps) {
+      const id = nameToId[n] ?? pushedByName.get(n);
+      if (id) depIds.push(id);
+      else unresolvedDeps.add(n); // upstream not in krill yet — order not enforced
+    }
     try {
       const created = await krill.createTask({
         project_id: projectId,
@@ -173,7 +212,7 @@ export async function pushBatch(team: Team, projectKey: string, { confirm = fals
         depends_on: depIds,
       });
       const kid = created?.task?.id || created?.id || null;
-      nameToId[t.name] = kid;
+      if (kid) { nameToId[t.name] = kid; pushedByName.set(t.name, kid); }
       updateProposed(t.id, { status: "pushed", krill_task_id: kid, push_error: null });
       results.push({ name: t.name, id: kid, depends_on: depIds });
     } catch (err) {
@@ -181,7 +220,16 @@ export async function pushBatch(team: Team, projectKey: string, { confirm = fals
       results.push({ name: t.name, error: (err as Error).message });
     }
   }
-  return { ok: true, pushed: results.filter((r) => r.id).length, total: items.length, results, warning };
+  const depWarning = unresolvedDeps.size
+    ? `${unresolvedDeps.size} cross-dump dependency(ies) not yet in krill — push those first to enforce order: ${[...unresolvedDeps].slice(0, 3).join(", ")}`
+    : undefined;
+  return {
+    ok: true,
+    pushed: results.filter((r) => r.id).length,
+    total: items.length,
+    results,
+    warning: warning ?? depWarning,
+  };
 }
 
 function topoByDeps(items: ProposedTask[], byName: Map<string, ProposedTask>): ProposedTask[] {
