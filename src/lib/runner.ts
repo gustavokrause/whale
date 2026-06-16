@@ -46,6 +46,14 @@ function runClaude({
         "--print",
         "--output-format", "text",
         "--disallowed-tools", ...disallowed,
+        // MCP is loaded by default so planning can reach project MCP servers
+        // (e.g. Supabase logs). An UNAUTHENTICATED MCP will hijack stdout with an
+        // OAuth prompt instead of the reply — authenticate it once so the headless
+        // child reuses the cached token. WHALE_NO_MCP=1 loads zero MCP servers as
+        // an escape hatch when one misbehaves (keeps CLI auth — never use --bare).
+        ...(process.env.WHALE_NO_MCP === "1"
+          ? ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
+          : []),
         "--dangerously-skip-permissions",
       ],
       { cwd, stdio: ["pipe", "pipe", "pipe"] },
@@ -77,6 +85,42 @@ function runClaude({
   });
 }
 
+// An MCP server / the CLI that isn't authenticated answers a headless call with
+// an OAuth URL / login prompt instead of doing the work. Detect it so the unit
+// can PAUSE and file a blocker (the unblock queue) rather than failing cryptically.
+const MCP_AUTH_RE =
+  /\b(authoriz|oauth|Open this URL|Please run \/login|Not logged in|authenticate)\b/i;
+const LOGIN_RE = /\b(Please run \/login|Not logged in)\b/i;
+
+export function looksLikeMcpAuth(text: string): boolean {
+  return MCP_AUTH_RE.test(text);
+}
+
+/** Classify a non-JSON reply as a blocker, or null if it's an ordinary failure. */
+export function classifyBlock(
+  text: string,
+): { kind: "mcp_auth" | "cli_login"; actionUrl?: string } | null {
+  if (!looksLikeMcpAuth(text)) return null;
+  return {
+    kind: LOGIN_RE.test(text) ? "cli_login" : "mcp_auth",
+    actionUrl: text.match(/https?:\/\/\S+/)?.[0],
+  };
+}
+
+/** Raised when a headless run hit something interactive a human must clear. */
+export class BlockedError extends Error {
+  kind: string;
+  detail: string;
+  actionUrl?: string;
+  constructor(o: { kind: string; summary: string; detail: string; actionUrl?: string }) {
+    super(o.summary);
+    this.name = "BlockedError";
+    this.kind = o.kind;
+    this.detail = o.detail;
+    this.actionUrl = o.actionUrl;
+  }
+}
+
 /** Sandboxed, returns parsed JSON — plan / route / refine. */
 export async function completeJSON<T = unknown>({ system, user, model }: RunArgs): Promise<T> {
   const text = await runClaude({
@@ -85,8 +129,20 @@ export async function completeJSON<T = unknown>({ system, user, model }: RunArgs
     model,
   });
   const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-  if (!match) throw new Error(`no JSON in claude reply: ${text.slice(0, 200)}`);
-  return JSON.parse(match[0]) as T;
+  if (match) return JSON.parse(match[0]) as T;
+  const block = classifyBlock(text);
+  if (block) {
+    throw new BlockedError({
+      kind: block.kind,
+      summary:
+        block.kind === "cli_login"
+          ? "The Claude CLI isn't logged in"
+          : "An MCP server needs authentication",
+      detail: text.slice(0, 600),
+      actionUrl: block.actionUrl,
+    });
+  }
+  throw new Error(`no JSON in claude reply: ${text.slice(0, 200)}`);
 }
 
 /** Read-only audit of a repo at `cwd` (Read/Grep/Glob allowed) — B5 onboarding. */
