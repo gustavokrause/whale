@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useDialog } from "@/components/ui/dialog-provider";
+import { PushReview, type PushEdit } from "@/components/whale/push-review";
 import { WhaleIcon } from "@/components/app/whale-icon";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
@@ -608,8 +609,34 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   const [items, setItems] = useState<EnrichedTask[]>([]);
   const [showRej, setShowRej] = useState(false);
   const [projects, setProjects] = useState<string[]>([]);
+  const [review, setReview] = useState<{ tasks: EnrichedTask[]; key: string; kind: "single" | "batch" } | null>(null);
+  const [sending, setSending] = useState(false);
   const { push } = useToast();
   const dlg = useDialog();
+
+  // Send-to-krill, after the pre-send review modal. Persists any inline
+  // overrides (PATCH per task), then pushes with confirm (the modal IS the gate).
+  const sendReview = async (edits: Record<string, PushEdit>) => {
+    if (!review) return;
+    setSending(true);
+    try {
+      for (const t of review.tasks) {
+        const e = edits[t.id];
+        if (e) await j(`/api/proposed/${t.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(e) });
+      }
+      let r;
+      if (review.kind === "single") r = await post(`/api/proposed/${review.tasks[0].id}/push`, { confirm: true });
+      else r = await post("/api/proposed/push-batch", { key: review.key, confirm: true });
+      if (r.error) push({ variant: "danger", title: "Push failed", description: r.error });
+      else if (review.kind === "batch") push({ variant: "success", title: `Pushed ${r.pushed}/${r.total || r.pushed} to krill` });
+      else push({ variant: "success", title: "Pushed to krill" });
+    } finally {
+      setSending(false);
+      setReview(null);
+      load();
+      onChange();
+    }
+  };
 
   // ?sync=1 reads back live krill status for pushed tasks (Gap A — no more stale rows)
   const load = useCallback(async () => {
@@ -629,6 +656,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
       r = await withBusy(action, post(`/api/proposed/${id}/${action}`, { confirm: true }));
     }
     if (r.error) push({ variant: "danger", title: "Failed", description: r.error });
+    else if (r.warning) push({ variant: "warning", title: "Auto-finish not armed in krill", description: r.warning });
     else if (r.note) push({ variant: "info", title: r.note });
     load();
     onChange();
@@ -666,18 +694,6 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
     load();
     onChange();
   };
-  const pushBatch = async (key: string) => {
-    let r = await withBusy(`Pushing ${key} to krill`, post("/api/proposed/push-batch", { key }));
-    if (r.needsConfirm) {
-      if (!(await dlg.confirm({ title: "⚠ Arm auto-finish", description: r.message, confirmLabel: "Arm", confirmVariant: "danger" }))) return load();
-      r = await withBusy(`Pushing ${key} to krill`, post("/api/proposed/push-batch", { key, confirm: true }));
-    }
-    if (r.ok) push({ variant: "success", title: `Pushed ${r.pushed}/${r.total || r.pushed} to krill` });
-    else push({ variant: "danger", title: "Batch push failed", description: r.error });
-    load();
-    onChange();
-  };
-
   const rejN = items.filter((p) => p.status === "rejected").length;
   const show = showRej ? items : items.filter((p) => p.status !== "rejected");
   const grouped = show.reduce<Record<string, EnrichedTask[]>>((a, p) => {
@@ -717,7 +733,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
               </span>
               <button
                 className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
-                onClick={() => pushBatch(key)}
+                onClick={() => setReview({ tasks: grouped[key].filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "batch" })}
                 disabled={pushable(grouped[key]) === 0}
                 title={`Push all pushable ${key} tasks to krill (dependency-ordered)`}
               >
@@ -758,8 +774,8 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                         <button className={danger} onClick={() => act(p.id, "reject")}>Reject</button>
                       </>
                     )}
-                    {p.status === "approved" && <button className={actBtn} onClick={() => act(p.id, "push")}>Push to krill</button>}
-                    {p.status === "push_failed" && <button className={actBtn} onClick={() => act(p.id, "push")}>Retry push</button>}
+                    {p.status === "approved" && <button className={actBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push to krill</button>}
+                    {p.status === "push_failed" && <button className={actBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry push</button>}
                     {p.status !== "pushed" && p.status !== "rejected" && (
                       <>
                         <button className={ghost} onClick={() => refine(p.id)}>Input</button>
@@ -776,6 +792,16 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
           </div>
         ))
       )}
+      {review && (
+        <PushReview
+          open
+          tasks={review.tasks}
+          projectKey={review.key}
+          busy={sending}
+          onCancel={() => setReview(null)}
+          onConfirm={sendReview}
+        />
+      )}
     </section>
   );
 }
@@ -786,6 +812,7 @@ const DIALS = [
   { id: "conservative", label: "Conservative", blurb: "Nothing skips you. Every proposed task waits for your plan review before krill builds it." },
   { id: "balanced", label: "Balanced", blurb: "Trivial work flows on its own; anything with real risk still waits for your review." },
   { id: "aggressive", label: "Aggressive", blurb: "Trivial work runs all the way to merged, unattended. Medium risk skips plan review. High risk still waits." },
+  { id: "ludicrous", label: "Ludicrous", blurb: "Every tier — including high risk — runs to merged, unattended. Only self-edit (whale/krill) still stops you. Needs allow_auto_finish on the krill project, or tasks stop at review (whale warns)." },
 ] as const;
 
 type Outcome = "review" | "bypass" | "auto";
@@ -801,9 +828,11 @@ const TIERS = [
   { id: "high", label: "High", eg: "delete · migration · schema · deploy · auth · payment · security — plus safe-words, new projects, and anything targeting whale/krill" },
 ] as const;
 
-// Mirrors triage() in stages.ts: high (and self-edit) always review; the dial only
-// moves low/medium.
+// Mirrors triage() in stages.ts. Ludicrous auto-finishes every tier (self-edit
+// excepted — see the protected-projects note below). Otherwise high always
+// reviews and the dial only moves low/medium.
 function outcomeFor(dial: string, tier: string): Outcome {
+  if (dial === "ludicrous") return "auto";
   if (tier === "high") return "review";
   if (tier === "low") return dial === "aggressive" ? "auto" : dial === "balanced" ? "bypass" : "review";
   return dial === "aggressive" ? "bypass" : "review"; // medium

@@ -18,6 +18,25 @@ import type { ProposedTask } from "@/db/schema";
 
 const expandHome = (p: string) => (p?.startsWith("~") ? p.replace(/^~/, homedir()) : p);
 
+// Self-edit floor: protected projects (whale/krill + env) never auto/bypass at
+// push, even if triage said so — defense in depth for the runaway-loop guard.
+const isProtected = (key?: string | null) =>
+  config.autonomy.protected.includes((key || "").toLowerCase());
+
+// Warn (don't patch): tasks armed for auto-finish are inert in krill unless the
+// project has allow_auto_finish ON. Surface it so the human flips it in krill.
+async function autoFinishWarning(
+  projectId: string,
+  projectKey: string,
+  count: number,
+): Promise<string | undefined> {
+  const proj = await krill.getProject(projectId);
+  if (proj && proj.allow_auto_finish === false) {
+    return `${count} task(s) armed for auto-finish, but krill project "${projectKey}" has allow_auto_finish OFF — they'll stop at deliverable review instead of running unattended. Enable it on the project in krill.`;
+  }
+  return undefined;
+}
+
 /** Onboarding (B5): make whale aware of a project via a read-only audit, or flag seed-needed. */
 export async function onboard(team: Team, key: string) {
   const meta = await krill.getProjectMeta(key);
@@ -122,7 +141,7 @@ export async function pushBatch(team: Team, projectKey: string, { confirm = fals
   );
   if (!items.length) return { ok: true, pushed: 0, results: [] };
 
-  const autoFin = items.filter((t) => t.auto_publish && t.risk_tier === "low");
+  const autoFin = items.filter((t) => t.auto_publish && !isProtected(t.project_key));
   if (autoFin.length && !confirm) {
     return {
       ok: false,
@@ -135,6 +154,9 @@ export async function pushBatch(team: Team, projectKey: string, { confirm = fals
   if (!(await krill.ping())) return { ok: false, error: "krill unreachable" };
   const projectId = await krill.resolveProjectId(projectKey);
   if (!projectId) return { ok: false, error: `no krill project for "${projectKey}" (create it first)` };
+  const warning = autoFin.length
+    ? await autoFinishWarning(projectId, projectKey, autoFin.length)
+    : undefined;
 
   const byName = new Map(items.map((t) => [t.name, t]));
   const ordered = topoByDeps(items, byName);
@@ -146,8 +168,8 @@ export async function pushBatch(team: Team, projectKey: string, { confirm = fals
       const created = await krill.createTask({
         project_id: projectId,
         name: t.name, description: t.description, priority: t.priority, mode: t.mode,
-        skip_plan_review: t.bypass && t.risk_tier !== "high",
-        auto_publish: !!t.auto_publish && t.risk_tier === "low",
+        skip_plan_review: !!t.bypass && !isProtected(t.project_key),
+        auto_publish: !!t.auto_publish && !isProtected(t.project_key),
         depends_on: depIds,
       });
       const kid = created?.task?.id || created?.id || null;
@@ -159,7 +181,7 @@ export async function pushBatch(team: Team, projectKey: string, { confirm = fals
       results.push({ name: t.name, error: (err as Error).message });
     }
   }
-  return { ok: true, pushed: results.filter((r) => r.id).length, total: items.length, results };
+  return { ok: true, pushed: results.filter((r) => r.id).length, total: items.length, results, warning };
 }
 
 function topoByDeps(items: ProposedTask[], byName: Map<string, ProposedTask>): ProposedTask[] {
@@ -243,7 +265,7 @@ export async function enrichPushed(items: ProposedTask[]): Promise<EnrichedPropo
 export async function push(id: string, { confirm = false }: { confirm?: boolean } = {}) {
   const t = getProposed(id);
   if (!t) throw new Error("proposed task not found");
-  if (t.auto_publish && t.risk_tier === "low" && !confirm) {
+  if (t.auto_publish && !isProtected(t.project_key) && !confirm) {
     return { task: t, pushed: false, needsConfirm: true, message: "This task auto-finishes (auto-merge to main, no review). Re-confirm to arm." };
   }
   if (!(await krill.ping())) {
@@ -266,17 +288,21 @@ export async function push(id: string, { confirm = false }: { confirm?: boolean 
       });
       return { task: f, pushed: false, error: f.push_error };
     }
+    const armed = !!t.auto_publish && !isProtected(t.project_key);
     const created = await krill.createTask({
       project_id: projectId,
       name: t.name,
       description: t.description,
       priority: t.priority,
       mode: t.mode,
-      skip_plan_review: t.bypass && t.risk_tier !== "high",
-      auto_publish: !!t.auto_publish && t.risk_tier === "low",
+      skip_plan_review: !!t.bypass && !isProtected(t.project_key),
+      auto_publish: armed,
     });
+    const warning = armed
+      ? await autoFinishWarning(projectId, t.project_key || "", 1)
+      : undefined;
     const done = updateProposed(id, { status: "pushed", krill_task_id: created?.id || created?.task?.id || null });
-    return { task: done, pushed: true, krill: created };
+    return { task: done, pushed: true, krill: created, warning };
   } catch (err) {
     const f = updateProposed(id, { status: "push_failed", push_error: (err as Error).message });
     return { task: f, pushed: false, error: (err as Error).message };

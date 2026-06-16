@@ -122,16 +122,28 @@ test("auto-finish rung (A2): auto_publish only for aggressive + low + non-self-e
   assert.equal(ap("fix typo", "whale", "aggressive"), false, "self-edit never auto-finishes");
 });
 
+test("ludicrous rung: auto_publish for EVERY tier except self-edit", () => {
+  const ap = (name: string, key: string) =>
+    triage(stubTeam, { name, description: "", project_key: key }, "ludicrous").auto_publish;
+  assert.equal(ap("fix typo", "arqtrack"), true, "low -> auto");
+  assert.equal(ap("build a feature", "arqtrack"), true, "medium -> auto");
+  assert.equal(ap("add a db migration", "arqtrack"), true, "high (irreversible) -> auto");
+  assert.equal(ap("change the pricing tier", "arqtrack"), true, "high (safe-word) -> auto");
+  assert.equal(ap("fix typo", "whale"), false, "self-edit never auto, even ludicrous");
+  assert.equal(ap("fix typo", "krill"), false, "self-edit never auto, even ludicrous");
+});
+
 test("self-edit guard: orchestrator tasks never bypass, any dial", () => {
   assert.equal(
     triage(stubTeam, { name: "fix typo", description: "", project_key: "arqtrack" }, "aggressive").bypass,
     true,
   );
   for (const key of config.autonomy.protected) {
-    for (const dial of ["conservative", "balanced", "aggressive"]) {
+    for (const dial of ["conservative", "balanced", "aggressive", "ludicrous"]) {
       const self = triage(stubTeam, { name: "fix typo", description: "", project_key: key }, dial);
       assert.equal(self.risk_tier, "high", `${key} self-edit is high risk`);
       assert.equal(self.bypass, false, `${key} self-edit never bypasses (${dial})`);
+      assert.equal(self.auto_publish, false, `${key} self-edit never auto-finishes (${dial})`);
     }
   }
 });

@@ -28,6 +28,7 @@ export type KrillProject = {
   name: string;
   folder_path: string;
   has_repo: boolean;
+  allow_auto_finish?: boolean;
 };
 
 export async function ping(): Promise<boolean> {
@@ -70,6 +71,16 @@ export async function resolveProjectId(projectKey: string): Promise<string | nul
   const projects = await listProjects();
   const hit = projects.find((p) => p.slug === want || keyToSlug(p.name) === want);
   return hit?.id || null;
+}
+
+/** Fetch one krill project (incl. allow_auto_finish). Tolerant: null on error. */
+export async function getProject(id: string): Promise<KrillProject | null> {
+  try {
+    const r = await call("GET", `/api/projects/${id}`);
+    return r?.project || r || null;
+  } catch {
+    return null;
+  }
 }
 
 export type CreateTaskArgs = {

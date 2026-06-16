@@ -6,7 +6,7 @@ import { json, fail } from "@/lib/api";
 export const dynamic = "force-dynamic";
 
 const RUNNERS = ["stub", "real"];
-const BYPASS = ["conservative", "balanced", "aggressive"];
+const BYPASS = ["conservative", "balanced", "aggressive", "ludicrous"];
 const MODELS = ["haiku", "sonnet", "opus"];
 
 // Only the UI-tunable subset, with allowed values. `protected` (self-edit guard)
@@ -26,7 +26,7 @@ function validateConfigPatch(b: Record<string, unknown>) {
     }
   }
   if ("bypass" in b) {
-    if (!BYPASS.includes(b.bypass as string)) throw new Error("bypass must be conservative|balanced|aggressive");
+    if (!BYPASS.includes(b.bypass as string)) throw new Error("bypass must be conservative|balanced|aggressive|ludicrous");
     out.bypass = b.bypass;
   }
   if ("auto_push" in b) out.auto_push = !!b.auto_push;
