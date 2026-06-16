@@ -7,7 +7,7 @@ import { isReal, config } from "./config";
 import { completeJSON } from "./runner";
 import { readContext } from "./context-store";
 import * as krill from "./krill-client";
-import { pendingRequests, markEntries, addProposed } from "@/db/queries";
+import { pendingRequests, markEntries, addProposed, listProposed, updateProposed } from "@/db/queries";
 import type { Team, Persona } from "./persona-loader";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
@@ -53,7 +53,12 @@ export async function plan(team: Team, key: string): Promise<ProposedTask[]> {
   const reqs = pendingRequests(key);
   if (!reqs.length) return [];
   const context = readContext(key); // background reference (may be empty if not onboarded)
-  const drafts = isReal() ? await planReal(team, key, context, reqs) : planStub(key, reqs);
+  // Standing backlog for this project — so a later plan run (e.g. a follow-up)
+  // can depend on existing tasks and not restate them.
+  const existing = listProposed()
+    .filter((p) => p.project_key === key && p.status !== "rejected")
+    .map((p) => ({ name: p.name, label: p.label }));
+  const drafts = isReal() ? await planReal(team, key, context, reqs, existing) : planStub(key, reqs);
   // Labels are the readable handle used in dep badges — keep them unique within
   // the run so they're unambiguous (second "payment" -> "payment-2").
   const usedLabels = new Map<string, number>();
@@ -67,8 +72,28 @@ export async function plan(team: Team, key: string): Promise<ProposedTask[]> {
   // One id per Plan click; each task is attributed to the dump it serves.
   const runId = randomUUID();
   const proposed = drafts.map((t) => triageAndStore(team, key, t, runId, reqs));
+  canonicalizeProjectDeps(key);
   markEntries(reqs.map((r) => r.id), "planned");
   return proposed;
+}
+
+/**
+ * Deps may come back as a task NAME or its short handle (label). Storage is
+ * keyed by name (UI/push resolve by name), so rewrite each dep to the canonical
+ * task name across the project, dropping self-refs and unknowns.
+ */
+export function canonicalizeProjectDeps(projectKey: string): void {
+  const all = listProposed().filter((p) => p.project_key === projectKey && p.status !== "rejected");
+  const toName = new Map<string, string>();
+  for (const t of all) {
+    toName.set(t.name, t.name);
+    if (t.label) toName.set(t.label, t.name);
+  }
+  for (const t of all) {
+    const deps = JSON.parse(t.deps || "[]") as string[];
+    const norm = [...new Set(deps.map((d) => toName.get(d)).filter((n): n is string => !!n && n !== t.name))];
+    if (JSON.stringify(norm) !== t.deps) updateProposed(t.id, { deps: JSON.stringify(norm) });
+  }
 }
 
 function planStub(key: string, reqs: InboxEntry[]): TaskDraft[] {
@@ -78,7 +103,13 @@ function planStub(key: string, reqs: InboxEntry[]): TaskDraft[] {
   });
 }
 
-async function planReal(team: Team, key: string, context: string, reqs: InboxEntry[]): Promise<TaskDraft[]> {
+async function planReal(
+  team: Team,
+  key: string,
+  context: string,
+  reqs: InboxEntry[],
+  existing: { name: string; label: string | null }[] = [],
+): Promise<TaskDraft[]> {
   const augusto = persona(team, "Augusto");
   const maria = persona(team, "Maria");
   const system =
@@ -110,11 +141,16 @@ async function planReal(team: Team, key: string, context: string, reqs: InboxEnt
     }
   }
 
+  const backlog = existing.length
+    ? `\n\nEXISTING PROPOSED TASKS for this project (already in the backlog — do NOT duplicate them; you MAY set depends_on to these EXACT names if your new tasks build on them):\n${existing
+        .map((e) => `- ${e.name}${e.label ? ` [${e.label}]` : ""}`)
+        .join("\n")}`
+    : "";
   const user =
     `PROJECT: ${key}\n\n` +
     `PROJECT CONTEXT (background, reference only):\n${context || "(not onboarded — no background context)"}\n\n` +
-    `WORK REQUESTS:\n${reqs.map((r, i) => `[${i}] ${r.text}`).join("\n")}\n\n` +
-    `Return a JSON array of proposed tasks (one or more per request as needed). Tag each with "source" = the [n] it serves.${fileNote}`;
+    `WORK REQUESTS:\n${reqs.map((r, i) => `[${i}] ${r.text}`).join("\n")}${backlog}\n\n` +
+    `Return a JSON array of proposed tasks (one or more per request as needed). Tag each with "source" = the [n] it serves. depends_on may reference EXISTING task names above OR your new tasks.${fileNote}`;
   const out = await completeJSON<TaskDraft[] | { tasks: TaskDraft[] }>({
     system,
     user,
@@ -263,14 +299,38 @@ export async function refineProposal(team: Team, current: ProposedTask, input: s
     };
   }
   const maria = persona(team, "Maria");
+
+  // Optional repo file-read access (same gate as Plan) so refine can verify
+  // details (a value, a path) instead of guessing.
+  let cwd: string | undefined;
+  let fileNote = "";
+  if (config.autonomy.planFileAccess) {
+    const meta = await krill.getProjectMeta(current.project_key).catch(() => null);
+    const folder = meta?.folder_path
+      ? meta.folder_path.replace(/^~(?=$|\/)/, homedir())
+      : undefined;
+    if (folder) {
+      cwd = folder;
+      fileNote = `\n\nYou have READ-ONLY access to this project's repo at ${folder} (Read/Grep/Glob) — read files to verify details rather than guessing.`;
+    }
+  }
+
+  // The standing backlog so refine can wire depends_on to existing tasks.
+  const existing = listProposed()
+    .filter((p) => p.project_key === current.project_key && p.id !== current.id && p.status !== "rejected")
+    .map((p) => `- ${p.name}${p.label ? ` [${p.label}]` : ""}`);
+  const backlog = existing.length
+    ? `\n\nOTHER PROPOSED TASKS for this project (you MAY set depends_on to these EXACT names if this task builds on them; do NOT duplicate them):\n${existing.join("\n")}`
+    : "";
+
   const system =
     `${maria?.systemPrompt || ""}\n\nRefine ONE proposed task per the user's input. Keep what's ` +
     `good, apply the change, don't invent extra scope. Return ` +
     `{name, description, priority(P0..P3), mode(dev|non-dev), depends_on:string[]}.`;
   const user =
-    `CURRENT TASK:\n${JSON.stringify({ name: current.name, description: current.description, priority: current.priority, mode: current.mode })}\n\n` +
-    `USER INPUT:\n${input}\n\nReturn the updated task JSON.`;
-  return completeJSON<TaskDraft>({ system, user, model: config.models.plan });
+    `CURRENT TASK:\n${JSON.stringify({ name: current.name, description: current.description, priority: current.priority, mode: current.mode, depends_on: JSON.parse(current.deps || "[]") })}\n\n` +
+    `USER INPUT:\n${input}${backlog}\n\nReturn the updated task JSON.${fileNote}`;
+  return completeJSON<TaskDraft>({ system, user, model: config.models.plan, cwd, fileAccess: !!cwd });
 }
 
 /** Human-readable preview of where a task will stop in krill, from its flags. */

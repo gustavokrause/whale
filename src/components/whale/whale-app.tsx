@@ -438,6 +438,9 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
                       <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
                         {e.status === "raw" ? "pending" : e.status}
                       </span>
+                      {e.source === "krill-followup" && (
+                        <span className="px-2 rounded-full bg-info/15 text-info" title="Auto-captured follow-up from a krill task">↩ from krill</span>
+                      )}
                       <span>{new Date(e.created_at).toLocaleString()}</span>
                       {un && (
                         <>
@@ -711,6 +714,11 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
     load();
     onChange();
   };
+  const togglePark = async (id: string, disabled: boolean) => {
+    await j(`/api/proposed/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ disabled }) });
+    load();
+    onChange();
+  };
   const rejN = items.filter((p) => p.status === "rejected").length;
   const show = showRej ? items : items.filter((p) => p.status !== "rejected");
   const grouped = show.reduce<Record<string, EnrichedTask[]>>((a, p) => {
@@ -719,7 +727,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   }, {});
   const groupKeys = Object.keys(grouped).sort();
   const pushable = (list: EnrichedTask[]) =>
-    list.filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)).length;
+    list.filter((p) => !p.disabled && ["proposed", "approved", "push_failed"].includes(p.status)).length;
   const dis = "disabled:opacity-40 disabled:cursor-not-allowed";
   // Execution order: a task lands after every dep it has in the set (topo sort).
   const topoSort = (list: EnrichedTask[]) => {
@@ -757,13 +765,22 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   const shortName = (s: string) => (s.length > 22 ? s.slice(0, 21) + "…" : s);
   const nameToTask = new Map(items.map((t) => [t.name, t]));
   // Reference a dep/dependent by its stable id (krill id once pushed, else TEMP)
-  // + its handle, so even repeated labels stay unambiguous.
-  const refOf = (name: string) => {
+  // + its handle; `done` (synced krill status) lets the UI strike completed ones.
+  const depMeta = (name: string) => {
     const t = nameToTask.get(name);
-    if (!t) return shortName(name);
+    if (!t) return { ref: shortName(name), done: false };
     const id = t.krill_task_id ?? `TEMP-${t.id.slice(0, 4).toUpperCase()}`;
-    return `${id} ${t.label || shortName(name)}`;
+    return { ref: `${id} ${t.label || shortName(name)}`, done: t.krill_status === "DONE" };
   };
+  const renderRefs = (names: string[]) =>
+    names.map((d, i) => {
+      const m = depMeta(d);
+      return (
+        <span key={d} className={m.done ? "line-through opacity-60" : ""}>
+          {i > 0 ? " + " : ""}{m.ref}
+        </span>
+      );
+    });
   // Reverse edges: task name -> names of tasks that depend on it (it unblocks).
   const dependents = new Map<string, string[]>();
   for (const t of items)
@@ -825,7 +842,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                   {g.id !== "__none__" && pushable(g.tasks) > 0 && (
                     <button
                       className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-2.5 !py-1 shrink-0`}
-                      onClick={() => setReview({ tasks: g.tasks.filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "group", sourceEntryId: g.id })}
+                      onClick={() => setReview({ tasks: g.tasks.filter((p) => !p.disabled && ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "group", sourceEntryId: g.id })}
                       title="Push this dump's tasks to krill (dependency-ordered)"
                     >
                       Push group <ArrowRight className="h-3 w-3" />
@@ -835,7 +852,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
             {!collapsedGroups.has(g.id) && (
             <ul className="divide-y divide-border">
               {g.tasks.map((p) => (
-                <li key={p.id} className="px-3 py-2.5">
+                <li key={p.id} className={`px-3 py-2.5 ${p.disabled ? "opacity-50" : ""}`}>
                   <span
                     className={`font-mono text-[10px] px-1.5 py-0.5 rounded mr-1.5 align-middle ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
                     title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
@@ -858,6 +875,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                     <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
                     <span className="px-2 rounded-full bg-border">{p.status}</span>
                     <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
+                    {p.disabled && <span className="px-2 rounded-full bg-muted/20 text-muted">⏸ parked</span>}
                     {(() => {
                       const deps = JSON.parse(p.deps || "[]") as string[];
                       if (!deps.length) return null;
@@ -867,7 +885,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                           className={`px-2 rounded-full ${cross ? "bg-info/15 text-info" : "bg-border"}`}
                           title={`runs after: ${deps.join(", ")}`}
                         >
-                          ← depends on: {deps.map(refOf).join(" + ")}{cross ? " · x-dump" : ""}
+                          ← depends on: {renderRefs(deps)}{cross ? " · x-dump" : ""}
                         </span>
                       );
                     })()}
@@ -879,7 +897,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                           className="px-2 rounded-full bg-border text-text-3"
                           title={`unblocks: ${blocks.join(", ")}`}
                         >
-                          → unblocks: {blocks.map(refOf).join(" + ")}
+                          → unblocks: {renderRefs(blocks)}
                         </span>
                       );
                     })()}
@@ -897,18 +915,25 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                     )}
                   </div>
                   <div className="flex gap-2 mt-2 flex-wrap">
-                    {p.status === "proposed" && (
+                    {p.disabled ? (
+                      <button className={actBtn} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again">▶ Unpark</button>
+                    ) : (
                       <>
-                        <button className={actBtn} onClick={() => act(p.id, "approve")}>Approve</button>
-                        <button className={danger} onClick={() => act(p.id, "reject")}>Reject</button>
-                      </>
-                    )}
-                    {p.status === "approved" && <button className={actBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push to krill</button>}
-                    {p.status === "push_failed" && <button className={actBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry push</button>}
-                    {p.status !== "pushed" && p.status !== "rejected" && (
-                      <>
-                        <button className={ghost} onClick={() => refine(p.id)}>Input</button>
-                        <button className={ghost} onClick={() => reassign(p.id)}>Reassign</button>
+                        {p.status === "proposed" && (
+                          <>
+                            <button className={actBtn} onClick={() => act(p.id, "approve")}>Approve</button>
+                            <button className={danger} onClick={() => act(p.id, "reject")}>Reject</button>
+                          </>
+                        )}
+                        {p.status === "approved" && <button className={actBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push to krill</button>}
+                        {p.status === "push_failed" && <button className={actBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry push</button>}
+                        {p.status !== "pushed" && p.status !== "rejected" && (
+                          <>
+                            <button className={ghost} onClick={() => refine(p.id)}>Input</button>
+                            <button className={ghost} onClick={() => reassign(p.id)}>Reassign</button>
+                            <button className={ghost} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes">⏸ Park</button>
+                          </>
+                        )}
                       </>
                     )}
                     <button className={`${danger} inline-flex items-center gap-1`} onClick={() => del(p.id)}>

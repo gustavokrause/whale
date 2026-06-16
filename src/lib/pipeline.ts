@@ -6,7 +6,7 @@ import { config, isReal } from "./config";
 import {
   getProposed, updateProposed, projectKeys, setEntryLane, listProposed, getEntry,
 } from "@/db/queries";
-import { plan, route, triage, refineProposal, flowPreview } from "./stages";
+import { plan, route, triage, refineProposal, flowPreview, canonicalizeProjectDeps } from "./stages";
 import { auditComplete } from "./runner";
 import {
   writeContext, listContextKeys, readContext, keyToSlug,
@@ -134,7 +134,7 @@ export async function routeEntry(team: Team, entryId: string) {
 export async function pushBatch(team: Team, projectKey: string, { confirm = false }: { confirm?: boolean } = {}) {
   void team;
   const items = listProposed().filter(
-    (t) => t.project_key === projectKey && ["proposed", "approved", "push_failed"].includes(t.status),
+    (t) => t.project_key === projectKey && !t.disabled && ["proposed", "approved", "push_failed"].includes(t.status),
   );
   return pushItems(projectKey, items, { confirm });
 }
@@ -149,6 +149,7 @@ export async function pushGroup(
     (t) =>
       t.project_key === projectKey &&
       t.source_entry_id === sourceEntryId &&
+      !t.disabled &&
       ["proposed", "approved", "push_failed"].includes(t.status),
   );
   return pushItems(projectKey, items, { confirm });
@@ -282,7 +283,8 @@ export async function refine(team: Team, id: string, input: string) {
     refine_log: JSON.stringify(log),
     status: "proposed",
   });
-  return { task: updated, flow: flowPreview(updated) };
+  canonicalizeProjectDeps(t.project_key); // map handle-deps → task names
+  return { task: getProposed(id) ?? updated, flow: flowPreview(updated) };
 }
 
 export const previewFlow = flowPreview;

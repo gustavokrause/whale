@@ -51,6 +51,9 @@ export const proposedTasks = sqliteTable(
     source_entry_id: text("source_entry_id"),
     refine_log: text("refine_log").notNull().default("[]"), // JSON: refine turns (B3)
     status: text("status").notNull().default("proposed"), // proposed|approved|rejected|pushed|push_failed
+    // Parked: can't be handled now (manual). Kept + visible but dimmed and
+    // excluded from pushing — focuses attention on what's actionable.
+    disabled: integer("disabled", { mode: "boolean" }).notNull().default(false),
     krill_task_id: text("krill_task_id"),
     push_error: text("push_error"),
     created_at: integer("created_at").notNull(),

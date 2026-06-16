@@ -112,6 +112,29 @@ export async function patchTask(id: string, fields: Record<string, unknown>) {
   return call("PATCH", `/api/tasks/${id}`, fields);
 }
 
+export type KrillFollowup = {
+  id: string;
+  task_id: string | null;
+  project_slug: string;
+  project_name: string;
+  title: string;
+  description: string;
+};
+
+/** Open follow-ups krill's stages flagged, for whale to ingest. Tolerant: []. */
+export async function listFollowups(): Promise<KrillFollowup[]> {
+  try {
+    const r = await call("GET", "/api/followups");
+    return Array.isArray(r) ? r : r?.followups || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function consumeFollowup(id: string): Promise<void> {
+  await call("POST", `/api/followups/${id}/consume`);
+}
+
 /** Fetch a krill task (for status sync-back). Tolerant: null if missing/unreachable. */
 export async function getTask(id: string): Promise<{ status?: string } | null> {
   try {
