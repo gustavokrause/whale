@@ -37,7 +37,7 @@ type Status = {
 type ConfigSnap = {
   runner: string;
   models: { plan: string; route: string };
-  autonomy: { bypass: string; autoPush: boolean; allowNewProjects: boolean };
+  autonomy: { bypass: string; autoPush: boolean; allowNewProjects: boolean; planFileAccess: boolean };
   envLocked: { protected: string[]; krillUrl: string; personasDir: string };
 };
 
@@ -429,6 +429,11 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
                 {grouped[p].map((e) => (
                   <li key={e.id} className="px-3 py-2.5">
                     {e.text}
+                    {e.plan_error ? (
+                      <div className="mt-1.5 rounded-sm border border-danger/40 bg-danger/10 text-danger text-xs px-2 py-1.5 break-words">
+                        ⚠ Plan failed: {e.plan_error}
+                      </div>
+                    ) : null}
                     <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
                       <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
                         {e.status === "raw" ? "pending" : e.status}
@@ -999,6 +1004,12 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
             onChange={(v) => save({ allow_new_projects: v })}
             title="Allow proposing new projects"
             desc="On: the router may route an idea to a brand-new project. Even then it's held for you — a new project is always high-risk and never auto-created."
+          />
+          <ToggleRow
+            on={c.autonomy.planFileAccess}
+            onChange={(v) => save({ plan_file_access: v })}
+            title="Planning can read the repo"
+            desc="On: the planner gets read-only access (Read/Grep/Glob) to the project's folder, so requests that reference files (“read docs/X.md”) work. Off: prompt-only planning."
           />
         </div>
       </SettingCard>

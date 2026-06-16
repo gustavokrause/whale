@@ -6,11 +6,12 @@ import { getTeam } from "./team";
 import { planProject } from "./pipeline";
 import { startJob, isRunning } from "./jobs";
 import { BlockedError } from "./runner";
-import { addBlocker } from "@/db/queries";
+import { addBlocker, setPlanError } from "@/db/queries";
 
 export async function startPlanJob(key: string): Promise<{ running: boolean }> {
   if (isRunning("plan", key)) return { running: true };
   const team = await getTeam();
+  setPlanError(key, null); // fresh attempt — clear any prior failure
   startJob("plan", key, async () => {
     try {
       const proposed = await planProject(team, key);
@@ -27,7 +28,10 @@ export async function startPlanJob(key: string): Promise<{ running: boolean }> {
         });
         return { ok: false, note: `blocked: ${e.message}` };
       }
-      throw e;
+      // Persist the failure on the pending dumps so the inbox shows WHY.
+      const msg = e instanceof Error ? e.message : String(e);
+      setPlanError(key, msg.slice(0, 400));
+      return { ok: false, note: `plan failed: ${msg.slice(0, 120)}` };
     }
   });
   return { running: true };

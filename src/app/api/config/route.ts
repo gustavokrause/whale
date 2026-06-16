@@ -31,6 +31,7 @@ function validateConfigPatch(b: Record<string, unknown>) {
   }
   if ("auto_push" in b) out.auto_push = !!b.auto_push;
   if ("allow_new_projects" in b) out.allow_new_projects = !!b.allow_new_projects;
+  if ("plan_file_access" in b) out.plan_file_access = !!b.plan_file_access;
   return out;
 }
 

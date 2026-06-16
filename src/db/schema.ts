@@ -21,6 +21,7 @@ export const inboxEntries = sqliteTable(
     project_hint: text("project_hint"),
     status: text("status").notNull().default("raw"), // raw (pending) | planned
     lane: text("lane"), // router: task | context | new_project | ask
+    plan_error: text("plan_error"), // last plan failure for this pending dump
     created_at: integer("created_at").notNull(),
   },
   (t) => ({ createdIdx: index("inbox_created_idx").on(t.created_at) }),
@@ -82,6 +83,9 @@ export const config = sqliteTable("config", {
   bypass: text("bypass"),
   auto_push: integer("auto_push", { mode: "boolean" }),
   allow_new_projects: integer("allow_new_projects", { mode: "boolean" }),
+  // Let planning READ the project repo (Read/Grep/Glob, scoped to the folder)
+  // so file-referencing dumps work. Off = prompt-only planning.
+  plan_file_access: integer("plan_file_access", { mode: "boolean" }),
 });
 
 export type InboxEntry = typeof inboxEntries.$inferSelect;

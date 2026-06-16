@@ -121,12 +121,24 @@ export class BlockedError extends Error {
   }
 }
 
-/** Sandboxed, returns parsed JSON — plan / route / refine. */
-export async function completeJSON<T = unknown>({ system, user, model }: RunArgs): Promise<T> {
+/**
+ * Sandboxed, returns parsed JSON — plan / route / refine. With fileAccess, the
+ * planner gets read-only repo tools (Read/Grep/Glob) scoped to `cwd` — for
+ * file-referencing dumps. Output is still text with the JSON appended.
+ */
+export async function completeJSON<T = unknown>({
+  system,
+  user,
+  model,
+  cwd,
+  fileAccess,
+}: RunArgs & { fileAccess?: boolean }): Promise<T> {
   const text = await runClaude({
     system,
     user: `${user}\n\nRespond with ONLY valid JSON, no prose, no markdown fences.`,
     model,
+    cwd,
+    disallowed: fileAccess ? AUDIT_DISALLOWED : SANDBOX_DISALLOWED,
   });
   const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
   if (match) return JSON.parse(match[0]) as T;

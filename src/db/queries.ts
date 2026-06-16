@@ -59,6 +59,13 @@ export function markEntries(ids: string[], status: string) {
   broadcast();
 }
 
+/** Record (or clear, with null) the last plan failure on a key's pending dumps. */
+export function setPlanError(key: string, error: string | null) {
+  for (const e of pendingRequests(key))
+    db.update(inboxEntries).set({ plan_error: error }).where(eq(inboxEntries.id, e.id)).run();
+  broadcast();
+}
+
 /** Persist the router's decision: set the lane, keep an existing hint else fill it. */
 export function setEntryLane(
   id: string,
@@ -156,7 +163,7 @@ export const deleteProposed = (id: string) => {
 
 export const CONFIG_FIELDS = [
   "runner", "model_plan", "model_route",
-  "bypass", "auto_push", "allow_new_projects",
+  "bypass", "auto_push", "allow_new_projects", "plan_file_access",
 ] as const;
 
 export const readConfig = (): ConfigRow | undefined =>

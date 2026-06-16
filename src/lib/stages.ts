@@ -1,9 +1,11 @@
 // whale — the thinking stages. Each has a deterministic stub (runs offline) and a
 // real path that uses the persona prompts loaded from ai-team.
 
+import { homedir } from "node:os";
 import { isReal, config } from "./config";
 import { completeJSON } from "./runner";
 import { readContext } from "./context-store";
+import * as krill from "./krill-client";
 import { pendingRequests, markEntries, addProposed } from "@/db/queries";
 import type { Team, Persona } from "./persona-loader";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
@@ -74,12 +76,35 @@ async function planReal(team: Team, key: string, context: string, reqs: InboxEnt
     `Sequence work that builds on other tasks: set depends_on to the exact names of ` +
     `the sibling tasks that must finish first ([] if independent). ` +
     `Each task: {name, description, priority(P0..P3), mode(dev|non-dev), depends_on: string[]}.`;
+  // Optional repo file-read access: scope the planner to the project's folder so
+  // requests that reference files ("read docs/X.md") can be grounded.
+  let cwd: string | undefined;
+  let fileNote = "";
+  if (config.autonomy.planFileAccess) {
+    const meta = await krill.getProjectMeta(key).catch(() => null);
+    const folder = meta?.folder_path
+      ? meta.folder_path.replace(/^~(?=$|\/)/, homedir())
+      : undefined;
+    if (folder) {
+      cwd = folder;
+      fileNote =
+        `\n\nYou have READ-ONLY access to this project's repo at ${folder} ` +
+        `(Read/Grep/Glob). Read any files the requests reference to ground the plan.`;
+    }
+  }
+
   const user =
     `PROJECT: ${key}\n\n` +
     `PROJECT CONTEXT (background, reference only):\n${context || "(not onboarded — no background context)"}\n\n` +
     `WORK REQUESTS:\n${reqs.map((r) => `- ${r.text}`).join("\n")}\n\n` +
-    `Return a JSON array of proposed tasks (one or more per request as needed).`;
-  const out = await completeJSON<TaskDraft[] | { tasks: TaskDraft[] }>({ system, user, model: config.models.plan });
+    `Return a JSON array of proposed tasks (one or more per request as needed).${fileNote}`;
+  const out = await completeJSON<TaskDraft[] | { tasks: TaskDraft[] }>({
+    system,
+    user,
+    model: config.models.plan,
+    cwd,
+    fileAccess: !!cwd,
+  });
   return Array.isArray(out) ? out : out.tasks || [];
 }
 

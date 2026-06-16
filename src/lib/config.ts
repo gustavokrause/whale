@@ -17,6 +17,7 @@ const envDefaults = {
   bypass: process.env.WHALE_BYPASS || "conservative",
   auto_push: process.env.WHALE_AUTOPUSH === "1",
   allow_new_projects: process.env.WHALE_ALLOW_NEW_PROJECTS === "1",
+  plan_file_access: process.env.WHALE_PLAN_FILE_ACCESS === "1",
 };
 
 type OverrideKey = keyof typeof envDefaults;
@@ -70,6 +71,9 @@ export const config = {
     get allowNewProjects() {
       return pickBool("allow_new_projects");
     },
+    get planFileAccess() {
+      return pickBool("plan_file_access");
+    },
     get protected() {
       return protectedList();
     },
@@ -91,6 +95,7 @@ export function configSnapshot() {
       bypass: config.autonomy.bypass,
       autoPush: config.autonomy.autoPush,
       allowNewProjects: config.autonomy.allowNewProjects,
+      planFileAccess: config.autonomy.planFileAccess,
     },
     envLocked: {
       protected: config.autonomy.protected,
