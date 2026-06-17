@@ -457,8 +457,8 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
                   <li key={e.id} className="px-3 py-2.5">
                     {e.text}
                     {e.plan_error ? (
-                      <div className="mt-1.5 rounded-sm border border-danger/40 bg-danger/10 text-danger text-xs px-2 py-1.5 break-words">
-                        ⚠ Plan failed: {e.plan_error}
+                      <div className="mt-1.5 rounded-sm border border-danger/40 bg-danger/10 text-danger text-xs px-2 py-1.5 break-words inline-flex items-start gap-1">
+                        <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" /> <span>Plan failed: {e.plan_error}</span>
                       </div>
                     ) : null}
                     <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
@@ -565,7 +565,7 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
       <p className={hint}>
         Per-project <b>background context</b> that <b>grounds Plan</b>. Planning a repo project
         <b> auto-builds</b> this on first run — onboard by hand only to seed an <b>idea project</b> (no repo)
-        or pre-build it. <b>Audit ↻</b> re-runs the audit; the <span className="text-warning">⚠ N</span> badge
+        or pre-build it. <b>Audit ↻</b> re-runs the audit; the <span className="text-warning inline-flex items-center gap-0.5 align-middle"><AlertTriangle className="h-3 w-3" /> N</span> badge
         means the repo moved N commits since the last audit.
       </p>
       <div className="space-y-2.5">
@@ -707,7 +707,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   const act = async (id: string, action: string) => {
     let r = await withBusy(action, post(`/api/proposed/${id}/${action}`));
     if (r.needsConfirm) {
-      if (!(await dlg.confirm({ title: "⚠ Arm auto-finish", description: r.message, confirmLabel: "Arm", confirmVariant: "danger" }))) return load();
+      if (!(await dlg.confirm({ title: "Arm auto-finish", description: r.message, confirmLabel: "Arm", confirmVariant: "danger" }))) return load();
       r = await withBusy(action, post(`/api/proposed/${id}/${action}`, { confirm: true }));
     }
     if (r.error) push({ variant: "danger", title: "Failed", description: r.error });
