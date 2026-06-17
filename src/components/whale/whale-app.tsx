@@ -103,7 +103,7 @@ export function WhaleApp() {
     document.documentElement.dataset.theme = next;
     try {
       localStorage.setItem("whale-theme", next);
-    } catch {}
+    } catch { }
     setTheme(next);
   };
 
@@ -153,7 +153,7 @@ export function WhaleApp() {
       setRev((r) => r + 1);
       loadStatus();
     };
-    es.onerror = () => {}; // browser auto-reconnects
+    es.onerror = () => { }; // browser auto-reconnects
     return () => es.close();
   }, [loadStatus]);
 
@@ -190,9 +190,8 @@ export function WhaleApp() {
               <button
                 key={id}
                 onClick={() => go(id)}
-                className={`group relative w-full flex items-center gap-2.5 pl-3.5 pr-2.5 py-2 rounded-lg text-sm transition-colors ${
-                  on ? "bg-surface text-text" : "text-text-2 hover:text-text hover:bg-surface/60"
-                }`}
+                className={`group relative w-full flex items-center gap-2.5 pl-3.5 pr-2.5 py-2 rounded-lg text-sm transition-colors ${on ? "bg-surface text-text" : "text-text-2 hover:text-text hover:bg-surface/60"
+                  }`}
               >
                 <span className={`absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary transition-opacity ${on ? "opacity-100" : "opacity-0"}`} />
                 <Icon className={`h-4 w-4 shrink-0 ${on ? "text-primary" : ""}`} />
@@ -285,6 +284,17 @@ const btn = "px-4 py-2 rounded-lg text-sm font-semibold";
 const actBtn = `${btn} bg-success text-white`;
 const ghost = `${btn} bg-surface-2 text-text border border-border`;
 const danger = `${btn} bg-danger/10 text-danger border border-danger/40`;
+// Discreet bulk action (Push batch / Push group): secondary to the per-task
+// Approve/Push primary, so the main flow stays the visual focus.
+const subtleBtn =
+  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-text-2 border border-border hover:bg-surface-2 hover:text-text";
+// Per-task primary (Approve / Push / Retry / Unpark): same compact size as the
+// bulk buttons, but green outline — the most-used action, distinct yet not loud.
+const pushBtn =
+  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-success border border-success/50 hover:bg-success/10";
+// Compact destructive (Reject / delete) — same size family, danger outline.
+const dangerSm =
+  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-danger border border-danger/40 hover:bg-danger/10";
 
 function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number; jobs: { kind: string; key: string }[] }) {
   const isJob = (kind: string, key: string) => jobs.some((x) => x.kind === kind && x.key === key);
@@ -841,7 +851,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                 )}
               </span>
               <button
-                className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
+                className={`${subtleBtn} ${dis}`}
                 onClick={() => setReview({ tasks: grouped[key].filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "batch" })}
                 disabled={pushable(grouped[key]) === 0}
                 title={`Push all pushable ${key} tasks to krill (dependency-ordered)`}
@@ -850,25 +860,25 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
               </button>
             </div>
             {dumpGroups(grouped[key]).map((g) => (
-              <div key={g.id} className="border-b border-border last:border-b-0">
-                <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-surface-2/40">
+              <div key={g.id} className={`border-b border-border last:border-b-0 ${!collapsedGroups.has(g.id) ? "bg-gray-100" : ""}`}>
+                <div className={`flex items-center justify-between gap-2 px-3 py-2 border-l-2 border-l-primary/50 ${collapsedGroups.has(g.id) ? "bg-white" : ""}`}>
                   <button
                     type="button"
                     onClick={() => toggleGroup(g.id)}
-                    className="text-xs text-text-2 min-w-0 truncate inline-flex items-center gap-1 hover:text-text"
+                    className="text-xs font-medium text-text min-w-0 truncate inline-flex items-center gap-1 hover:text-primary"
                     title={collapsedGroups.has(g.id) ? "Expand" : "Collapse"}
                   >
                     <span className="shrink-0 text-text-3 w-3">{collapsedGroups.has(g.id) ? "▸" : "▾"}</span>
                     {g.id === "__none__" ? (
                       "Ungrouped"
                     ) : (
-                      <><Pencil className="h-3 w-3 shrink-0" /> {(g.text ?? "dump").slice(0, 90)}</>
+                      <span className="text-xs">{(g.text ?? "dump").slice(0, 90)}</span>
                     )}
                     <span className="text-text-3">· {g.tasks.length} task{g.tasks.length === 1 ? "" : "s"}</span>
                   </button>
                   {g.id !== "__none__" && pushable(g.tasks) > 0 && (
                     <button
-                      className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-2.5 !py-1 shrink-0`}
+                      className={`${subtleBtn} ${dis} shrink-0`}
                       onClick={() => setReview({ tasks: g.tasks.filter((p) => !p.disabled && ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "group", sourceEntryId: g.id })}
                       title="Push this dump's tasks to krill (dependency-ordered)"
                     >
@@ -876,122 +886,125 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                     </button>
                   )}
                 </div>
-            {!collapsedGroups.has(g.id) && (
-            <ul className="divide-y divide-border">
-              {g.tasks.map((p) => {
-                const open = expandedCards.has(p.id);
-                const deps = JSON.parse(p.deps || "[]") as string[];
-                const blocking = blockingDeps(p);
-                const depsCleared = readyForKrill(p);
-                const blockedByDeps = actionable(p) && blocking.length > 0;
-                const blocks = dependents.get(p.name) ?? [];
-                const crossDep = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
-                const refines = JSON.parse(p.refine_log || "[]").length;
-                return (
-                <li key={p.id} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : ""}`}>
-                  {/* collapsed header — one scannable row: ref · label · name · risk · status · primary action */}
-                  <div className="flex items-center gap-2 px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => toggleCard(p.id)}
-                      className="flex items-center gap-2 min-w-0 flex-1 text-left hover:text-text"
-                      title={open ? "Collapse" : "Expand"}
-                    >
-                      <span className="shrink-0 text-text-3 w-3 text-xs">{open ? "▾" : "▸"}</span>
-                      <span
-                        className={`shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
-                        title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
-                      >
-                        {p.krill_task_id ?? `TEMP-${p.id.slice(0, 4).toUpperCase()}`}
-                      </span>
-                      {p.label ? (
-                        <span className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary">{p.label}</span>
-                      ) : null}
-                      <b className="truncate">{p.name}</b>
-                    </button>
-                    <span className="shrink-0 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
-                      {riskDot(p.risk_tier)} {p.risk_tier || "?"}
-                    </span>
-                    {p.status === "pushed" && p.krill_status ? (
-                      <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full ${p.krill_status === "DONE" ? "bg-success/20 text-success" : p.krill_status === "CANCELED" ? "bg-muted/20 text-muted" : "bg-info/20 text-info"}`}>
-                        {p.krill_status}
-                      </span>
-                    ) : (
-                      <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-border text-text-2">{p.status}</span>
-                    )}
-                    {p.disabled && <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-full bg-muted/20 text-muted" title="parked">⏸</span>}
-                    {depsCleared && (
-                      <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title={deps.length === 0 ? "No dependencies — ready to push to krill" : `All ${deps.length} ${deps.length === 1 ? "dependency is" : "dependencies are"} DONE — ready to push to krill`}>
-                        ✅ ready
-                      </span>
-                    )}
-                    {blockedByDeps && (
-                      <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning" title={`Waiting on: ${blocking.join(", ")}`}>
-                        ⛔ blocked {blocking.length}
-                      </span>
-                    )}
-                    {/* primary action, inline */}
-                    {p.disabled ? (
-                      <button className={`${actBtn} !px-3 !py-1`} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again">▶</button>
-                    ) : p.status === "proposed" ? (
-                      <button className={`${actBtn} !px-3 !py-1`} onClick={() => act(p.id, "approve")}>Approve</button>
-                    ) : p.status === "approved" ? (
-                      <button className={`${actBtn} !px-3 !py-1`} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push</button>
-                    ) : p.status === "push_failed" ? (
-                      <button className={`${actBtn} !px-3 !py-1`} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
-                    ) : null}
-                  </div>
-                  {/* expanded detail — description, meta, rationale, secondary actions */}
-                  {open && (
-                    <div className="px-3 pb-3 pl-8 space-y-2">
-                      {p.description && <p className="text-xs text-text-2">{p.description}</p>}
-                      <div className="text-xs text-text-2 flex gap-2 flex-wrap items-center">
-                        <span className="px-2 rounded-full bg-border">{p.priority}</span>
-                        <span className="px-2 rounded-full bg-border">{p.mode}</span>
-                        <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
-                        <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
-                        {deps.length > 0 && (
-                          <span className={`px-2 rounded-full ${crossDep ? "bg-info/15 text-info" : "bg-border"}`} title={`runs after: ${deps.join(", ")}`}>
-                            ← depends on: {renderRefs(deps)}{crossDep ? " · x-dump" : ""}
-                          </span>
-                        )}
-                        {blocks.length > 0 && (
-                          <span className="px-2 rounded-full bg-border text-text-3" title={`unblocks: ${blocks.join(", ")}`}>
-                            → unblocks: {renderRefs(blocks)}
-                          </span>
-                        )}
-                      </div>
-                      {(p.rationale || p.push_error || refines > 0) && (
-                        <div className="text-xs text-text-2">
-                          {p.rationale}
-                          {p.push_error && ` · ⚠ ${p.push_error}`}
-                          {refines > 0 && (
-                            <span className="inline-flex items-center gap-0.5">{" · "}<Pencil className="h-3 w-3" /> refined {refines}×</span>
+                {!collapsedGroups.has(g.id) && (
+
+
+                  <ul className="flex-1 divide-y divide-border">
+                    {g.tasks.map((p) => {
+                      const open = expandedCards.has(p.id);
+                      const deps = JSON.parse(p.deps || "[]") as string[];
+                      const blocking = blockingDeps(p);
+                      const depsCleared = readyForKrill(p);
+                      const blockedByDeps = actionable(p) && blocking.length > 0;
+                      const blocks = dependents.get(p.name) ?? [];
+                      const crossDep = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
+                      const refines = JSON.parse(p.refine_log || "[]").length;
+                      return (
+                        <li key={p.id} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : "bg-white"}`}>
+                          {/* collapsed header — one scannable row: ref · label · name · risk · status · primary action */}
+                          <div className="flex items-center gap-2 px-3 py-2 pl-7 hover:bg-surface-2/40 transition-colors">
+                            <button
+                              type="button"
+                              onClick={() => toggleCard(p.id)}
+                              className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer hover:text-text"
+                              title={open ? "Collapse" : "Expand"}
+                            >
+                              <span className="shrink-0 text-text-3 w-3 text-xs">{open ? "▾" : "▸"}</span>
+                              <span
+                                className={`shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
+                                title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
+                              >
+                                {p.krill_task_id ?? `TEMP-${p.id.slice(0, 4).toUpperCase()}`}
+                              </span>
+                              {p.label ? (
+                                <span className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary">{p.label}</span>
+                              ) : null}
+                              <span className="text-sm font-medium break-words">{p.name}</span>
+                            </button>
+                            <span className="shrink-0 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
+                              {riskDot(p.risk_tier)} {p.risk_tier || "?"}
+                            </span>
+                            {p.status === "pushed" && p.krill_status ? (
+                              <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full ${p.krill_status === "DONE" ? "bg-success/20 text-success" : p.krill_status === "CANCELED" ? "bg-muted/20 text-muted" : "bg-info/20 text-info"}`}>
+                                {p.krill_status}
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-border text-text-2">{p.status}</span>
+                            )}
+                            {p.disabled && <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-full bg-muted/20 text-muted" title="parked">⏸</span>}
+                            {depsCleared && (
+                              <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title={deps.length === 0 ? "No dependencies — ready to push to krill" : `All ${deps.length} ${deps.length === 1 ? "dependency is" : "dependencies are"} DONE — ready to push to krill`}>
+                                ✅ ready
+                              </span>
+                            )}
+                            {blockedByDeps && (
+                              <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning" title={`Waiting on: ${blocking.join(", ")}`}>
+                                ⛔ blocked {blocking.length}
+                              </span>
+                            )}
+                            {/* primary action, inline */}
+                            {p.disabled ? (
+                              <button className={pushBtn} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again">▶</button>
+                            ) : p.status === "proposed" ? (
+                              <button className={pushBtn} onClick={() => act(p.id, "approve")}>Approve</button>
+                            ) : p.status === "approved" ? (
+                              <button className={pushBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push</button>
+                            ) : p.status === "push_failed" ? (
+                              <button className={pushBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
+                            ) : null}
+                          </div>
+                          {/* expanded detail — description, meta, rationale, secondary actions */}
+                          {open && (
+                            <div className="p-4 pt-1 pl-8 space-y-4">
+                              {p.description && <p className="border border-dashed rounded-md p-3 text-xs text-text-2">{p.description}</p>}
+                              <div className="text-xs text-text-2 flex gap-2 flex-wrap items-center">
+                                <span className="px-2 rounded-full bg-border">{p.priority}</span>
+                                <span className="px-2 rounded-full bg-border">{p.mode}</span>
+                                <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
+                                <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
+                                {deps.length > 0 && (
+                                  <span className={`px-2 rounded-full ${crossDep ? "bg-info/15 text-info" : "bg-border"}`} title={`runs after: ${deps.join(", ")}`}>
+                                    ← depends on: {renderRefs(deps)}{crossDep ? " · x-dump" : ""}
+                                  </span>
+                                )}
+                                {blocks.length > 0 && (
+                                  <span className="px-2 rounded-full bg-border text-text-3" title={`unblocks: ${blocks.join(", ")}`}>
+                                    → unblocks: {renderRefs(blocks)}
+                                  </span>
+                                )}
+                              </div>
+                              {(p.rationale || p.push_error || refines > 0) && (
+                                <div className="text-xs text-text-2">
+                                  {p.rationale}
+                                  {p.push_error && ` · ⚠ ${p.push_error}`}
+                                  {refines > 0 && (
+                                    <span className="inline-flex items-center gap-0.5">{" · "}<Pencil className="h-3 w-3" /> refined {refines}×</span>
+                                  )}
+                                </div>
+                              )}
+                              <div className="flex gap-2 flex-wrap">
+                                {!p.disabled && p.status === "proposed" && (
+                                  <button className={dangerSm} onClick={() => act(p.id, "reject")}>Reject</button>
+                                )}
+                                {!p.disabled && p.status !== "pushed" && p.status !== "rejected" && (
+                                  <>
+                                    <button className={subtleBtn} onClick={() => refine(p.id)}>Input</button>
+                                    <button className={subtleBtn} onClick={() => reassign(p.id)}>Reassign</button>
+                                    <button className={subtleBtn} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes">⏸ Park</button>
+                                  </>
+                                )}
+                                <button className={dangerSm} onClick={() => del(p.id)}>
+                                  <Trash2 className="h-3.5 w-3.5" /> delete
+                                </button>
+                              </div>
+                            </div>
                           )}
-                        </div>
-                      )}
-                      <div className="flex gap-2 flex-wrap">
-                        {!p.disabled && p.status === "proposed" && (
-                          <button className={danger} onClick={() => act(p.id, "reject")}>Reject</button>
-                        )}
-                        {!p.disabled && p.status !== "pushed" && p.status !== "rejected" && (
-                          <>
-                            <button className={ghost} onClick={() => refine(p.id)}>Input</button>
-                            <button className={ghost} onClick={() => reassign(p.id)}>Reassign</button>
-                            <button className={ghost} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes">⏸ Park</button>
-                          </>
-                        )}
-                        <button className={`${danger} inline-flex items-center gap-1`} onClick={() => del(p.id)}>
-                          <Trash2 className="h-3.5 w-3.5" /> delete
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </li>
-                );
-              })}
-            </ul>
-            )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                )}
               </div>
             ))}
           </div>
