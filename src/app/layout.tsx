@@ -3,6 +3,7 @@ import { Ubuntu, Ubuntu_Mono } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { DialogProvider } from "@/components/ui/dialog-provider";
+import { RestartSafety } from "@/components/whale/restart-safety";
 
 const ubuntu = Ubuntu({
   subsets: ["latin"],
@@ -34,9 +35,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: SET_THEME }} />
       </head>
-      <body className="font-mono bg-bg text-text antialiased min-h-screen">
+      <body className="font-mono bg-bg text-text antialiased min-h-screen pb-9">
         <ToastProvider>
           <DialogProvider>{children}</DialogProvider>
+          <RestartSafety />
         </ToastProvider>
       </body>
     </html>

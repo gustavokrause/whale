@@ -629,6 +629,14 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
+  // Cards are collapsed by default (scannable list); expand one for full detail.
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const toggleCard = (id: string) =>
+    setExpandedCards((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
   const { push } = useToast();
   const dlg = useDialog();
 
@@ -786,6 +794,20 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
   for (const t of items)
     for (const d of JSON.parse(t.deps || "[]") as string[])
       dependents.set(d, [...(dependents.get(d) ?? []), t.name]);
+  // Actionable = not parked and not yet pushed (can still go to krill).
+  const actionable = (p: EnrichedTask) =>
+    !p.disabled && ["proposed", "approved", "push_failed"].includes(p.status);
+  // Deps that aren't DONE yet — the things still blocking this task from krill.
+  const blockingDeps = (p: EnrichedTask) =>
+    (JSON.parse(p.deps || "[]") as string[]).filter((d) => !depMeta(d).done);
+  // Ready for krill = actionable + every dep DONE (no-dep tasks are trivially ready).
+  const readyForKrill = (p: EnrichedTask) => actionable(p) && blockingDeps(p).length === 0;
+  // Per-project rollup: how many tasks are unblocked and ready to push now.
+  const readyCount = (list: EnrichedTask[]) => list.filter(readyForKrill).length;
+  // Risk → a single signal: colored left border + one dot. Kills the risk pill.
+  const riskDot = (t?: string | null) => (t === "high" ? "🔴" : t === "low" ? "🟢" : "🟡");
+  const riskBorder = (t?: string | null) =>
+    t === "high" ? "border-l-danger" : t === "low" ? "border-l-success" : "border-l-warning";
 
   return (
     <section>
@@ -812,6 +834,11 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                   · {grouped[key].length} task{grouped[key].length === 1 ? "" : "s"}
                   {pushable(grouped[key]) > 0 ? `, ${pushable(grouped[key])} pushable` : ""}
                 </span>
+                {readyCount(grouped[key]) > 0 && (
+                  <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title="Unblocked — every dependency is DONE, ready to push to krill now">
+                    ✅ {readyCount(grouped[key])} ready
+                  </span>
+                )}
               </span>
               <button
                 className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
@@ -851,97 +878,118 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                 </div>
             {!collapsedGroups.has(g.id) && (
             <ul className="divide-y divide-border">
-              {g.tasks.map((p) => (
-                <li key={p.id} className={`px-3 py-2.5 ${p.disabled ? "opacity-50" : ""}`}>
-                  <span
-                    className={`font-mono text-[10px] px-1.5 py-0.5 rounded mr-1.5 align-middle ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
-                    title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
-                  >
-                    {p.krill_task_id ?? `TEMP-${p.id.slice(0, 4).toUpperCase()}`}
-                  </span>
-                  {p.label ? (
-                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary mr-2 align-middle">
-                      {p.label}
+              {g.tasks.map((p) => {
+                const open = expandedCards.has(p.id);
+                const deps = JSON.parse(p.deps || "[]") as string[];
+                const blocking = blockingDeps(p);
+                const depsCleared = readyForKrill(p);
+                const blockedByDeps = actionable(p) && blocking.length > 0;
+                const blocks = dependents.get(p.name) ?? [];
+                const crossDep = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
+                const refines = JSON.parse(p.refine_log || "[]").length;
+                return (
+                <li key={p.id} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : ""}`}>
+                  {/* collapsed header — one scannable row: ref · label · name · risk · status · primary action */}
+                  <div className="flex items-center gap-2 px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleCard(p.id)}
+                      className="flex items-center gap-2 min-w-0 flex-1 text-left hover:text-text"
+                      title={open ? "Collapse" : "Expand"}
+                    >
+                      <span className="shrink-0 text-text-3 w-3 text-xs">{open ? "▾" : "▸"}</span>
+                      <span
+                        className={`shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
+                        title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
+                      >
+                        {p.krill_task_id ?? `TEMP-${p.id.slice(0, 4).toUpperCase()}`}
+                      </span>
+                      {p.label ? (
+                        <span className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary">{p.label}</span>
+                      ) : null}
+                      <b className="truncate">{p.name}</b>
+                    </button>
+                    <span className="shrink-0 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
+                      {riskDot(p.risk_tier)} {p.risk_tier || "?"}
                     </span>
-                  ) : null}
-                  <b>{p.name}</b>
-                  {p.description && <div className="text-xs text-text-2 mt-1">{p.description}</div>}
-                  <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
-                    <span className={`px-2 rounded-full ${p.risk_tier === "high" ? "bg-danger/20 text-danger" : p.risk_tier === "low" ? "bg-success/20 text-success" : "bg-warning/20 text-warning"}`}>
-                      {p.risk_tier || "?"} risk
-                    </span>
-                    <span className="px-2 rounded-full bg-border">{p.priority}</span>
-                    <span className="px-2 rounded-full bg-border">{p.mode}</span>
-                    <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
-                    <span className="px-2 rounded-full bg-border">{p.status}</span>
-                    <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
-                    {p.disabled && <span className="px-2 rounded-full bg-muted/20 text-muted">⏸ parked</span>}
-                    {(() => {
-                      const deps = JSON.parse(p.deps || "[]") as string[];
-                      if (!deps.length) return null;
-                      const cross = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
-                      return (
-                        <span
-                          className={`px-2 rounded-full ${cross ? "bg-info/15 text-info" : "bg-border"}`}
-                          title={`runs after: ${deps.join(", ")}`}
-                        >
-                          ← depends on: {renderRefs(deps)}{cross ? " · x-dump" : ""}
-                        </span>
-                      );
-                    })()}
-                    {(() => {
-                      const blocks = dependents.get(p.name) ?? [];
-                      if (!blocks.length) return null;
-                      return (
-                        <span
-                          className="px-2 rounded-full bg-border text-text-3"
-                          title={`unblocks: ${blocks.join(", ")}`}
-                        >
-                          → unblocks: {renderRefs(blocks)}
-                        </span>
-                      );
-                    })()}
-                    {p.status === "pushed" && p.krill_status && (
-                      <span className={`px-2 rounded-full ${p.krill_status === "DONE" ? "bg-success/20 text-success" : p.krill_status === "CANCELED" ? "bg-muted/20 text-muted" : "bg-info/20 text-info"}`}>
-                        krill: {p.krill_status}
+                    {p.status === "pushed" && p.krill_status ? (
+                      <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full ${p.krill_status === "DONE" ? "bg-success/20 text-success" : p.krill_status === "CANCELED" ? "bg-muted/20 text-muted" : "bg-info/20 text-info"}`}>
+                        {p.krill_status}
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-border text-text-2">{p.status}</span>
+                    )}
+                    {p.disabled && <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-full bg-muted/20 text-muted" title="parked">⏸</span>}
+                    {depsCleared && (
+                      <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title={deps.length === 0 ? "No dependencies — ready to push to krill" : `All ${deps.length} ${deps.length === 1 ? "dependency is" : "dependencies are"} DONE — ready to push to krill`}>
+                        ✅ ready
                       </span>
                     )}
-                  </div>
-                  <div className="text-xs text-text-2 mt-1">
-                    {p.rationale}
-                    {p.push_error && ` · ⚠ ${p.push_error}`}
-                    {JSON.parse(p.refine_log || "[]").length > 0 && (
-                      <span className="inline-flex items-center gap-0.5">{" · "}<Pencil className="h-3 w-3" /> refined {JSON.parse(p.refine_log).length}×</span>
+                    {blockedByDeps && (
+                      <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning" title={`Waiting on: ${blocking.join(", ")}`}>
+                        ⛔ blocked {blocking.length}
+                      </span>
                     )}
-                  </div>
-                  <div className="flex gap-2 mt-2 flex-wrap">
+                    {/* primary action, inline */}
                     {p.disabled ? (
-                      <button className={actBtn} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again">▶ Unpark</button>
-                    ) : (
-                      <>
-                        {p.status === "proposed" && (
-                          <>
-                            <button className={actBtn} onClick={() => act(p.id, "approve")}>Approve</button>
-                            <button className={danger} onClick={() => act(p.id, "reject")}>Reject</button>
-                          </>
+                      <button className={`${actBtn} !px-3 !py-1`} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again">▶</button>
+                    ) : p.status === "proposed" ? (
+                      <button className={`${actBtn} !px-3 !py-1`} onClick={() => act(p.id, "approve")}>Approve</button>
+                    ) : p.status === "approved" ? (
+                      <button className={`${actBtn} !px-3 !py-1`} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push</button>
+                    ) : p.status === "push_failed" ? (
+                      <button className={`${actBtn} !px-3 !py-1`} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
+                    ) : null}
+                  </div>
+                  {/* expanded detail — description, meta, rationale, secondary actions */}
+                  {open && (
+                    <div className="px-3 pb-3 pl-8 space-y-2">
+                      {p.description && <p className="text-xs text-text-2">{p.description}</p>}
+                      <div className="text-xs text-text-2 flex gap-2 flex-wrap items-center">
+                        <span className="px-2 rounded-full bg-border">{p.priority}</span>
+                        <span className="px-2 rounded-full bg-border">{p.mode}</span>
+                        <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
+                        <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
+                        {deps.length > 0 && (
+                          <span className={`px-2 rounded-full ${crossDep ? "bg-info/15 text-info" : "bg-border"}`} title={`runs after: ${deps.join(", ")}`}>
+                            ← depends on: {renderRefs(deps)}{crossDep ? " · x-dump" : ""}
+                          </span>
                         )}
-                        {p.status === "approved" && <button className={actBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push to krill</button>}
-                        {p.status === "push_failed" && <button className={actBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry push</button>}
-                        {p.status !== "pushed" && p.status !== "rejected" && (
+                        {blocks.length > 0 && (
+                          <span className="px-2 rounded-full bg-border text-text-3" title={`unblocks: ${blocks.join(", ")}`}>
+                            → unblocks: {renderRefs(blocks)}
+                          </span>
+                        )}
+                      </div>
+                      {(p.rationale || p.push_error || refines > 0) && (
+                        <div className="text-xs text-text-2">
+                          {p.rationale}
+                          {p.push_error && ` · ⚠ ${p.push_error}`}
+                          {refines > 0 && (
+                            <span className="inline-flex items-center gap-0.5">{" · "}<Pencil className="h-3 w-3" /> refined {refines}×</span>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex gap-2 flex-wrap">
+                        {!p.disabled && p.status === "proposed" && (
+                          <button className={danger} onClick={() => act(p.id, "reject")}>Reject</button>
+                        )}
+                        {!p.disabled && p.status !== "pushed" && p.status !== "rejected" && (
                           <>
                             <button className={ghost} onClick={() => refine(p.id)}>Input</button>
                             <button className={ghost} onClick={() => reassign(p.id)}>Reassign</button>
                             <button className={ghost} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes">⏸ Park</button>
                           </>
                         )}
-                      </>
-                    )}
-                    <button className={`${danger} inline-flex items-center gap-1`} onClick={() => del(p.id)}>
-                      <Trash2 className="h-3.5 w-3.5" /> delete
-                    </button>
-                  </div>
+                        <button className={`${danger} inline-flex items-center gap-1`} onClick={() => del(p.id)}>
+                          <Trash2 className="h-3.5 w-3.5" /> delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
             )}
               </div>
