@@ -184,9 +184,10 @@ export function WhaleApp() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden">
       {busy > 0 && <div className="fixed top-0 left-0 h-0.5 w-[30%] bg-primary animate-[ind_1.1s_linear_infinite] z-50" />}
 
+      <div className="flex flex-1 min-h-0">
       {/* command rail */}
       <aside className="w-56 shrink-0 flex flex-col border-r border-border bg-surface-2">
         <div className="flex items-center gap-2.5 px-4 h-14 border-b border-border">
@@ -223,34 +224,6 @@ export function WhaleApp() {
           })}
         </nav>
 
-        <div className="border-t border-border p-3 space-y-2">
-          {status ? (
-            <div className="text-[11px] text-text-2 leading-relaxed space-y-0.5">
-              <div>runner <span className="text-text">{status.runner}</span></div>
-              <div>bypass <span className="text-text">{status.autonomy.bypass}</span></div>
-              <div className="inline-flex items-center gap-1">
-                krill
-                <Circle className={`h-2 w-2 ${status.krill.up ? "fill-success text-success" : "fill-danger text-danger"}`} />
-                <span className="text-text">{status.krill.up ? "up" : "down"}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="text-[11px] text-text-3">connecting…</div>
-          )}
-          {jobs.length > 0 && (
-            <div className="text-[11px] text-info inline-flex items-center gap-1" title={jobs.map((x) => `${x.kind} ${x.key}`).join(", ")}>
-              <Loader2 className="h-3 w-3 animate-spin" /> {jobs.length} job{jobs.length === 1 ? "" : "s"} running
-            </div>
-          )}
-          <button
-            onClick={toggleTheme}
-            className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-text-2 hover:text-text border border-border hover:bg-surface"
-            title="Toggle dark/light"
-          >
-            {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-            {theme === "dark" ? "Light" : "Dark"}
-          </button>
-        </div>
       </aside>
 
       {/* working area — full width */}
@@ -262,11 +235,21 @@ export function WhaleApp() {
               <Loader2 className="h-3 w-3 animate-spin" /> {busyLabel}…
             </span>
           )}
-          {status && (
-            <span className="ml-auto text-xs text-text-2">
-              inbox {status.inbox.raw}/{status.inbox.total} · proposed {status.proposed.total} · autoPush {String(status.autonomy.autoPush)}
-            </span>
-          )}
+          <div className="ml-auto flex items-center gap-3">
+            {status && (
+              <span className="text-xs text-text-2">
+                inbox {status.inbox.raw}/{status.inbox.total} · proposed {status.proposed.total} · autoPush {String(status.autonomy.autoPush)}
+              </span>
+            )}
+            <button
+              onClick={toggleTheme}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-text-2 hover:text-text border border-border hover:bg-surface"
+              title="Toggle dark/light"
+            >
+              {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+              {theme === "dark" ? "Light" : "Dark"}
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto px-6 py-6">
@@ -288,6 +271,32 @@ export function WhaleApp() {
           </div>
         </main>
       </div>
+      </div>
+
+      <footer className="shrink-0 border-t border-border px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-text-2">
+        {jobs.length > 0 ? (
+          <span className="inline-flex items-center gap-1.5 font-medium text-danger" title={jobs.map((x) => `${x.kind} ${x.key}`).join(", ")}>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Working — don&apos;t stop/rebuild ({jobs.length} job{jobs.length === 1 ? "" : "s"})
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-text-3" title="No in-flight Claude jobs — safe to stop/rebuild whale.">
+            <CheckCircle2 className="h-3.5 w-3.5 text-success/70" /> safe to restart
+          </span>
+        )}
+        {status ? (
+          <>
+            <span>runner <span className="text-text">{status.runner}</span></span>
+            <span>bypass <span className="text-text">{status.autonomy.bypass}</span></span>
+            <span className="inline-flex items-center gap-1">
+              krill
+              <Circle className={`h-2 w-2 ${status.krill.up ? "fill-success text-success" : "fill-danger text-danger"}`} />
+              <span className="text-text">{status.krill.up ? "up" : "down"}</span>
+            </span>
+          </>
+        ) : (
+          <span className="text-text-3">connecting…</span>
+        )}
+      </footer>
 
       <style>{`@keyframes ind{0%{left:-30%}100%{left:100%}}`}</style>
     </div>
