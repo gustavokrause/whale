@@ -113,7 +113,11 @@ export function WhaleApp() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   useEffect(() => {
-    setTheme((document.documentElement.dataset.theme as "dark" | "light") || "dark");
+    let saved: string | null = null;
+    try { saved = localStorage.getItem("whale-theme"); } catch { }
+    const t = saved === "light" ? "light" : "dark";
+    document.documentElement.dataset.theme = t;
+    setTheme(t);
   }, []);
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
