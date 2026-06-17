@@ -118,8 +118,9 @@ Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PRO
   badged **ready** (per-project count too); still-blocked tasks show what they wait on.
 - **krill-aware push** — Push / Retry / Push batch / Push group disable when krill is
   down (`/api/status`), re-enabling automatically when it recovers.
-- **Restart-safety footer** — warns **"working — don't stop/rebuild"** while a Claude
-  job is in flight (`/api/jobs`), else **"safe to restart"**.
+- **Status footer** — fleet status (runner · autonomy bypass · krill up/down) plus a
+  restart-safety chip: **"working — don't stop/rebuild"** while a Claude job is in
+  flight (`/api/jobs`), else **"safe to restart"**. (Theme toggle lives in the header.)
 
 ### Editing config at runtime
 
