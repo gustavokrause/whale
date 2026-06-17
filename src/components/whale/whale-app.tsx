@@ -18,6 +18,7 @@ import {
   Ban,
   Pause,
   Play,
+  Lock,
   Inbox as InboxIcon,
   BookOpen,
   ListChecks,
@@ -1009,7 +1010,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                                   <>
                                     <button className={subtleBtn} onClick={() => refine(p.id)}>Input</button>
                                     <button className={subtleBtn} onClick={() => reassign(p.id)}>Reassign</button>
-                                    <button className={subtleBtn} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes">⏸ Park</button>
+                                    <button className={subtleBtn} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes"><Pause className="h-3 w-3" /> Park</button>
                                   </>
                                 )}
                                 <button className={dangerSm} onClick={() => del(p.id)}>
@@ -1054,10 +1055,10 @@ const DIALS = [
 ] as const;
 
 type Outcome = "review" | "bypass" | "auto";
-const OUTCOME: Record<Outcome, { dot: string; label: string; note: string; cls: string }> = {
-  review: { dot: "🔴", label: "Human review", note: "Holds in Proposed until you approve the plan", cls: "text-info border-info/40 bg-info/10" },
-  bypass: { dot: "🟡", label: "Skip plan review", note: "Auto-plans & builds; you review the finished deliverable", cls: "text-warning border-warning/40 bg-warning/10" },
-  auto: { dot: "🟢", label: "Auto-finish", note: "Runs to DONE and merges to main — no review at all", cls: "text-success border-success/40 bg-success/10" },
+const OUTCOME: Record<Outcome, { tone: keyof typeof DOT; label: string; note: string; cls: string }> = {
+  review: { tone: "danger", label: "Human review", note: "Holds in Proposed until you approve the plan", cls: "text-info border-info/40 bg-info/10" },
+  bypass: { tone: "warning", label: "Skip plan review", note: "Auto-plans & builds; you review the finished deliverable", cls: "text-warning border-warning/40 bg-warning/10" },
+  auto: { tone: "success", label: "Auto-finish", note: "Runs to DONE and merges to main — no review at all", cls: "text-success border-success/40 bg-success/10" },
 };
 
 const TIERS = [
@@ -1194,7 +1195,7 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
                     return (
                       <td key={d.id} className="p-1.5">
                         <div className={`rounded-md border px-2 py-1.5 transition-opacity ${o.cls} ${active ? "ring-1 ring-current" : "opacity-40"}`}>
-                          <span className="font-medium whitespace-nowrap">{o.dot} {o.label}</span>
+                          <span className="inline-flex items-center gap-1 font-medium whitespace-nowrap"><Dot tone={o.tone} /> {o.label}</span>
                         </div>
                       </td>
                     );
@@ -1209,7 +1210,7 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
           {(Object.keys(OUTCOME) as Outcome[]).map((k) => (
             <div key={k} className="flex items-start gap-1.5 text-[11px] text-text-2 leading-snug">
-              <span>{OUTCOME[k].dot}</span>
+              <span className="inline-flex items-center pt-0.5"><Dot tone={OUTCOME[k].tone} /></span>
               <span><b className="text-text">{OUTCOME[k].label}</b> — {OUTCOME[k].note}</span>
             </div>
           ))}
@@ -1279,7 +1280,7 @@ function SettingsTab({ withBusy, onSaved, rev }: { withBusy: Busy; onSaved: () =
       >
         <div className="flex flex-wrap gap-2 text-xs">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-danger/15 text-danger font-mono">
-            🔒 self-edit guard: {c.envLocked.protected.join(", ")}
+            <Lock className="h-3 w-3" /> self-edit guard: {c.envLocked.protected.join(", ")}
           </span>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-border text-text-2 font-mono">
             krill: {c.envLocked.krillUrl}
