@@ -264,7 +264,7 @@ export function WhaleApp() {
             <ContextTab withBusy={withBusy} rev={rev} jobs={jobs} />
           </div>
           <div hidden={tab !== "proposed"}>
-            <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} rev={rev} />
+            <ProposedTab withBusy={withBusy} onChange={loadStatus} active={tab === "proposed"} rev={rev} krillDown={status?.krill.up === false} />
           </div>
           <div hidden={tab !== "settings"}>
             <SettingsTab withBusy={withBusy} onSaved={loadStatus} rev={rev} />
@@ -626,7 +626,7 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
 
 type EnrichedTask = ProposedTask & { krill_status?: string | null; source_entry_text?: string | null };
 
-function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number }) {
+function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number; krillDown: boolean }) {
   const [items, setItems] = useState<EnrichedTask[]>([]);
   const [showRej, setShowRej] = useState(false);
   const [projects, setProjects] = useState<string[]>([]);
@@ -853,8 +853,8 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
               <button
                 className={`${subtleBtn} ${dis}`}
                 onClick={() => setReview({ tasks: grouped[key].filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "batch" })}
-                disabled={pushable(grouped[key]) === 0}
-                title={`Push all pushable ${key} tasks to krill (dependency-ordered)`}
+                disabled={pushable(grouped[key]) === 0 || krillDown}
+                title={krillDown ? "krill is down — can't push" : `Push all pushable ${key} tasks to krill (dependency-ordered)`}
               >
                 Push batch <ArrowRight className="h-3.5 w-3.5" />
               </button>
@@ -865,7 +865,7 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                   <button
                     type="button"
                     onClick={() => toggleGroup(g.id)}
-                    className="text-xs font-medium text-text min-w-0 truncate inline-flex items-center gap-1 hover:text-primary"
+                    className="flex-1 text-xs font-medium text-text min-w-0 truncate inline-flex items-center gap-1 hover:text-primary"
                     title={collapsedGroups.has(g.id) ? "Expand" : "Collapse"}
                   >
                     <span className="shrink-0 text-text-3 w-3">{collapsedGroups.has(g.id) ? "▸" : "▾"}</span>
@@ -880,7 +880,8 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                     <button
                       className={`${subtleBtn} ${dis} shrink-0`}
                       onClick={() => setReview({ tasks: g.tasks.filter((p) => !p.disabled && ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "group", sourceEntryId: g.id })}
-                      title="Push this dump's tasks to krill (dependency-ordered)"
+                      disabled={krillDown}
+                      title={krillDown ? "krill is down — can't push" : "Push this dump's tasks to krill (dependency-ordered)"}
                     >
                       Push group <ArrowRight className="h-3 w-3" />
                     </button>
@@ -948,9 +949,9 @@ function ProposedTab({ withBusy, onChange, active, rev }: { withBusy: Busy; onCh
                             ) : p.status === "proposed" ? (
                               <button className={pushBtn} onClick={() => act(p.id, "approve")}>Approve</button>
                             ) : p.status === "approved" ? (
-                              <button className={pushBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push</button>
+                              <button className={`${pushBtn} ${dis}`} disabled={krillDown} title={krillDown ? "krill is down — can't push" : undefined} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push</button>
                             ) : p.status === "push_failed" ? (
-                              <button className={pushBtn} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
+                              <button className={`${pushBtn} ${dis}`} disabled={krillDown} title={krillDown ? "krill is down — can't push" : undefined} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
                             ) : null}
                           </div>
                           {/* expanded detail — description, meta, rationale, secondary actions */}
