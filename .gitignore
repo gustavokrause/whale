@@ -4,3 +4,9 @@ data/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# sqlite (stray DBs outside data/)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
