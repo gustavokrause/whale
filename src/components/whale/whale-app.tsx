@@ -325,8 +325,12 @@ const dangerSm =
 function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number; jobs: { kind: string; key: string }[] }) {
   const isJob = (kind: string, key: string) => jobs.some((x) => x.kind === kind && x.key === key);
   const [entries, setEntries] = useState<InboxEntry[]>([]);
-  const [text, setText] = useState("");
-  const [project, setProject] = useState("");
+  const [text, setText] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("whale-inbox-draft") ?? "" : ""
+  );
+  const [project, setProject] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("whale-inbox-project") ?? "" : ""
+  );
   const [projects, setProjects] = useState<string[]>([]);
   const { push } = useToast();
   const dlg = useDialog();
@@ -344,11 +348,20 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
     const id = setInterval(() => active && !document.hidden && load(), 5000);
     return () => clearInterval(id);
   }, [load, active, rev]);
+  useEffect(() => {
+    if (text) localStorage.setItem("whale-inbox-draft", text);
+    else localStorage.removeItem("whale-inbox-draft");
+  }, [text]);
+  useEffect(() => {
+    if (project) localStorage.setItem("whale-inbox-project", project);
+    else localStorage.removeItem("whale-inbox-project");
+  }, [project]);
 
   const dump = async () => {
     if (!text.trim()) return;
     await withBusy("Capturing", post("/api/inbox", { text: text.trim(), project_hint: project || null }));
     setText("");
+    setProject("");
     load();
     onChange();
   };
