@@ -13,6 +13,11 @@ import {
   RotateCw,
   AlertTriangle,
   ChevronDown,
+  ChevronRight,
+  CheckCircle2,
+  Ban,
+  Pause,
+  Play,
   Inbox as InboxIcon,
   BookOpen,
   ListChecks,
@@ -75,10 +80,21 @@ const j = async (url: string, opts?: RequestInit) => (await fetch(url, opts)).js
 const post = (url: string, body?: unknown) =>
   j(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
 
-function flowOf(p: ProposedTask): string {
-  if (p.risk_tier === "high") return "🔴 full review";
-  if (p.auto_publish) return "🟢 auto-finish→DONE";
-  if (p.bypass) return "🟡 →deliverable";
+// colored status dot (filled lucide Circle) — literal classes so Tailwind JIT keeps them
+const DOT = {
+  danger: "fill-danger text-danger",
+  success: "fill-success text-success",
+  warning: "fill-warning text-warning",
+  orange: "fill-orange-500 text-orange-500",
+} as const;
+function Dot({ tone, className = "" }: { tone: keyof typeof DOT; className?: string }) {
+  return <Circle className={`h-2 w-2 shrink-0 ${DOT[tone]} ${className}`} />;
+}
+
+function flowOf(p: ProposedTask): React.ReactNode {
+  if (p.risk_tier === "high") return <><Dot tone="danger" /> full review</>;
+  if (p.auto_publish) return <><Dot tone="success" /> auto-finish→DONE</>;
+  if (p.bypass) return <><Dot tone="warning" /> →deliverable</>;
   return "plan review";
 }
 
@@ -815,15 +831,17 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   // Per-project rollup: how many tasks are unblocked and ready to push now.
   const readyCount = (list: EnrichedTask[]) => list.filter(readyForKrill).length;
   // Risk → a single signal: colored left border + one dot. Kills the risk pill.
-  const riskDot = (t?: string | null) => (t === "high" ? "🔴" : t === "low" ? "🟢" : "🟡");
+  const riskDot = (t?: string | null) => (
+    <Dot tone={t === "high" ? "danger" : t === "low" ? "success" : "orange"} />
+  );
   const riskBorder = (t?: string | null) =>
-    t === "high" ? "border-l-danger" : t === "low" ? "border-l-success" : "border-l-warning";
+    t === "high" ? "border-l-danger" : t === "low" ? "border-l-success" : "border-l-orange-500";
 
   return (
     <section>
       <p className={hint}>
         The review gate, <b>grouped by project</b>. Each task shows <b>risk</b> + whether it&apos;ll
-        <b> bypass</b> (🟢) or wait (🔴/🟡). Push a task alone (<b>Approve</b> → <b>Push to krill</b>) or
+        <b> bypass</b> (<Dot tone="success" className="inline align-middle" />) or wait (<Dot tone="danger" className="inline align-middle" />/<Dot tone="orange" className="inline align-middle" />). Push a task alone (<b>Approve</b> → <b>Push to krill</b>) or
         <b> Push batch</b> a whole project in dependency order.
       </p>
       {rejN > 0 && (
@@ -845,8 +863,8 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                   {pushable(grouped[key]) > 0 ? `, ${pushable(grouped[key])} pushable` : ""}
                 </span>
                 {readyCount(grouped[key]) > 0 && (
-                  <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title="Unblocked — every dependency is DONE, ready to push to krill now">
-                    ✅ {readyCount(grouped[key])} ready
+                  <span className="ml-2 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title="Unblocked — every dependency is DONE, ready to push to krill now">
+                    <CheckCircle2 className="h-3 w-3" /> {readyCount(grouped[key])} ready
                   </span>
                 )}
               </span>
@@ -868,7 +886,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                     className="flex-1 text-xs font-medium text-text min-w-0 truncate inline-flex items-center gap-1 hover:text-primary"
                     title={collapsedGroups.has(g.id) ? "Expand" : "Collapse"}
                   >
-                    <span className="shrink-0 text-text-3 w-3">{collapsedGroups.has(g.id) ? "▸" : "▾"}</span>
+                    <span className="shrink-0 text-text-3 inline-flex">{collapsedGroups.has(g.id) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
                     {g.id === "__none__" ? (
                       "Ungrouped"
                     ) : (
@@ -910,7 +928,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                               className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer hover:text-text"
                               title={open ? "Collapse" : "Expand"}
                             >
-                              <span className="shrink-0 text-text-3 w-3 text-xs">{open ? "▾" : "▸"}</span>
+                              <span className="shrink-0 text-text-3 inline-flex">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</span>
                               <span
                                 className={`shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
                                 title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
@@ -922,7 +940,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                               ) : null}
                               <span className="text-sm font-medium break-words">{p.name}</span>
                             </button>
-                            <span className="shrink-0 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
+                            <span className="shrink-0 inline-flex items-center gap-1 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
                               {riskDot(p.risk_tier)} {p.risk_tier || "?"}
                             </span>
                             {p.status === "pushed" && p.krill_status ? (
@@ -932,20 +950,20 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                             ) : (
                               <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-border text-text-2">{p.status}</span>
                             )}
-                            {p.disabled && <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-full bg-muted/20 text-muted" title="parked">⏸</span>}
+                            {p.disabled && <span className="shrink-0 inline-flex items-center text-[11px] px-1.5 py-0.5 rounded-full bg-muted/20 text-muted" title="parked"><Pause className="h-3 w-3" /></span>}
                             {depsCleared && (
-                              <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title={deps.length === 0 ? "No dependencies — ready to push to krill" : `All ${deps.length} ${deps.length === 1 ? "dependency is" : "dependencies are"} DONE — ready to push to krill`}>
-                                ✅ ready
+                              <span className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title={deps.length === 0 ? "No dependencies — ready to push to krill" : `All ${deps.length} ${deps.length === 1 ? "dependency is" : "dependencies are"} DONE — ready to push to krill`}>
+                                <CheckCircle2 className="h-3 w-3" /> ready
                               </span>
                             )}
                             {blockedByDeps && (
-                              <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning" title={`Waiting on: ${blocking.join(", ")}`}>
-                                ⛔ blocked {blocking.length}
+                              <span className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning" title={`Waiting on: ${blocking.join(", ")}`}>
+                                <Ban className="h-3 w-3" /> blocked {blocking.length}
                               </span>
                             )}
                             {/* primary action, inline */}
                             {p.disabled ? (
-                              <button className={pushBtn} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again">▶</button>
+                              <button className={pushBtn} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again"><Play className="h-3.5 w-3.5" /></button>
                             ) : p.status === "proposed" ? (
                               <button className={pushBtn} onClick={() => act(p.id, "approve")}>Approve</button>
                             ) : p.status === "approved" ? (
@@ -962,7 +980,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                                 <span className="px-2 rounded-full bg-border">{p.priority}</span>
                                 <span className="px-2 rounded-full bg-border">{p.mode}</span>
                                 <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
-                                <span className="px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
+                                <span className="inline-flex items-center gap-1 px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
                                 {deps.length > 0 && (
                                   <span className={`px-2 rounded-full ${crossDep ? "bg-info/15 text-info" : "bg-border"}`} title={`runs after: ${deps.join(", ")}`}>
                                     ← depends on: {renderRefs(deps)}{crossDep ? " · x-dump" : ""}
@@ -977,7 +995,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                               {(p.rationale || p.push_error || refines > 0) && (
                                 <div className="text-xs text-text-2">
                                   {p.rationale}
-                                  {p.push_error && ` · ⚠ ${p.push_error}`}
+                                  {p.push_error && <span className="inline-flex items-center gap-1">{" · "}<AlertTriangle className="h-3 w-3 text-danger" /> {p.push_error}</span>}
                                   {refines > 0 && (
                                     <span className="inline-flex items-center gap-0.5">{" · "}<Pencil className="h-3 w-3" /> refined {refines}×</span>
                                   )}
