@@ -111,7 +111,15 @@ Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PRO
   short handles, `← depends on` / `→ unblocks` refs, and `TEMP-` ids (→ krill id on push).
 - **Blocker queue** — if planning hits something interactive it can't answer headless
   (MCP auth, CLI login) it pauses and files a blocker; clear it to resume the plan.
+  MCP-auth blockers don't show the captured link (it's single-use + dead); auth the
+  MCP once in a live `claude` → `/mcp` session, then Resume.
 - **Plan failures** surface on the dump (no more silent `raw`).
+- **Ready-for-krill highlight** — a proposed task whose dependencies are all DONE is
+  badged **ready** (per-project count too); still-blocked tasks show what they wait on.
+- **krill-aware push** — Push / Retry / Push batch / Push group disable when krill is
+  down (`/api/status`), re-enabling automatically when it recovers.
+- **Restart-safety footer** — warns **"working — don't stop/rebuild"** while a Claude
+  job is in flight (`/api/jobs`), else **"safe to restart"**.
 
 ### Editing config at runtime
 
