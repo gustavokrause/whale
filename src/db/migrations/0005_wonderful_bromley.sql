@@ -1,0 +1,1 @@
+ALTER TABLE `proposed_tasks` ADD `disabled` integer DEFAULT false NOT NULL;

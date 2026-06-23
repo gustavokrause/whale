@@ -1,0 +1,114 @@
+// whale — CONTEXT store. whale owns its memory (keyed by project), so user
+// project repos stay clean. One living markdown file per project + 'global'.
+
+import {
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  readdirSync,
+  unlinkSync,
+} from "node:fs";
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+
+// Resolved lazily: calling process.cwd() at module top-level makes Next's file
+// tracer treat the whole project root as a dependency (NFT warnings).
+const getDir = () =>
+  process.env.WHALE_CONTEXT_DIR ||
+  path.resolve(/* turbopackIgnore: true */ process.cwd(), "data/context");
+
+export const keyToSlug = (key: string | null | undefined): string =>
+  (key || "global")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "global";
+
+const fileFor = (key: string) => path.join(getDir(), `${keyToSlug(key)}.md`);
+const metaFileFor = (key: string) => path.join(getDir(), `${keyToSlug(key)}.meta.json`);
+
+// Sidecar metadata (the repo HEAD the context was audited against) so we can tell
+// when the cached context has drifted from the live repo. Kept beside the .md;
+// listContextKeys ignores it (only .md counts).
+export type ContextMeta = { head?: string; at?: number };
+
+export function readContextMeta(key: string): ContextMeta {
+  const f = metaFileFor(key);
+  if (!existsSync(f)) return {};
+  try {
+    return JSON.parse(readFileSync(f, "utf8")) as ContextMeta;
+  } catch {
+    return {};
+  }
+}
+
+export function writeContextMeta(key: string, meta: ContextMeta): void {
+  mkdirSync(getDir(), { recursive: true });
+  writeFileSync(metaFileFor(key), JSON.stringify(meta), "utf8");
+}
+
+const GIT_IO: { encoding: "utf8"; stdio: ["ignore", "pipe", "ignore"] } = {
+  encoding: "utf8",
+  stdio: ["ignore", "pipe", "ignore"],
+};
+
+/** Current git HEAD of a repo dir, or "" if not a git repo / git missing. */
+export function gitHead(dir: string): string {
+  try {
+    return execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], GIT_IO).trim();
+  } catch {
+    return "";
+  }
+}
+
+/** Commits added to `dir` since `from` (drift since the audit). 0 if same/unknown. */
+export function commitsSince(dir: string, from: string): number {
+  if (!from) return 0;
+  try {
+    const out = execFileSync("git", ["-C", dir, "rev-list", "--count", `${from}..HEAD`], GIT_IO).trim();
+    const n = parseInt(out, 10);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// The audit (onboard) runs via `claude --print` and sometimes emits a
+// thinking preamble before the contracted "# CONTEXT —" header. Strip anything
+// before the first CONTEXT heading so stored memory matches the contract.
+function normalizeContext(md: string): string {
+  const heading = (md || "").match(/^# CONTEXT\b.*$/m);
+  if (!heading) return (md || "").trim();
+  return md.slice(md.indexOf(heading[0])).trim();
+}
+
+export function readContext(key: string): string {
+  const f = fileFor(key);
+  return existsSync(f) ? readFileSync(f, "utf8") : "";
+}
+
+export function writeContext(key: string, md: string): string {
+  mkdirSync(getDir(), { recursive: true });
+  writeFileSync(fileFor(key), normalizeContext(md), "utf8");
+  return fileFor(key);
+}
+
+// Forget a project's background context. whale-local only — never touches the
+// repo or krill. Returns false if there was nothing stored for the key.
+export function deleteContext(key: string): boolean {
+  const f = fileFor(key);
+  const m = metaFileFor(key);
+  const had = existsSync(f);
+  if (had) unlinkSync(f);
+  if (existsSync(m)) unlinkSync(m); // drop the staleness sidecar too
+  return had;
+}
+
+export function listContextKeys(): string[] {
+  const DIR = getDir();
+  if (!existsSync(DIR)) return [];
+  return readdirSync(DIR)
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => f.replace(/\.md$/, ""));
+}
