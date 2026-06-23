@@ -1,0 +1,1 @@
+ALTER TABLE `config` ADD `model_nominate` text;

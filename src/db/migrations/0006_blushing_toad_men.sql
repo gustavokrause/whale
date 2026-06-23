@@ -1,0 +1,1 @@
+ALTER TABLE `proposed_tasks` ADD `acceptance` text;
