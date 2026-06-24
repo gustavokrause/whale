@@ -964,8 +964,8 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
               </button>
             </div>
             {dumpGroups(grouped[key]).map((g) => (
-              <div key={g.id} className={`border-b border-border last:border-b-0 ${!collapsedGroups.has(g.id) ? "bg-gray-100" : ""}`}>
-                <div className={`flex items-center justify-between gap-2 px-3 py-2 border-l-2 border-l-primary/50 ${collapsedGroups.has(g.id) ? "bg-white" : ""}`}>
+              <div key={g.id} className={`border-b border-border last:border-b-0 ${!collapsedGroups.has(g.id) ? "bg-surface-2" : ""}`}>
+                <div className={`flex items-center justify-between gap-2 px-3 py-2 border-l-2 border-l-primary/50 ${collapsedGroups.has(g.id) ? "bg-surface" : ""}`}>
                   <button
                     type="button"
                     onClick={() => toggleGroup(g.id)}
@@ -1006,7 +1006,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                       const crossDep = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
                       const refines = JSON.parse(p.refine_log || "[]").length;
                       return (
-                        <li key={p.id} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : "bg-white"}`}>
+                        <li key={p.id} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : "bg-surface"}`}>
                           {/* collapsed header — one scannable row: ref · label · name · risk · status · primary action */}
                           <div className="flex items-center gap-2 px-3 py-2 pl-7 hover:bg-surface-2/40 transition-colors">
                             <button
