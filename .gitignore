@@ -10,3 +10,6 @@ next-env.d.ts
 *.db-shm
 *.db-wal
 *.db-journal
+
+# playwright MCP scratch (page snapshots + console logs — leaks board/project data)
+.playwright-mcp/
