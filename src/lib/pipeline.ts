@@ -23,6 +23,35 @@ const expandHome = (p: string) => (p?.startsWith("~") ? p.replace(/^~/, homedir(
 const isProtected = (key?: string | null) =>
   config.autonomy.protected.includes((key || "").toLowerCase());
 
+// Single source of truth for the krill create payload — used by BOTH the single
+// and group push paths so the two can't drift (the exact gap that let group push
+// silently drop skip-plan-review). The self-edit guard is enforced HERE, last:
+// protected (whale/krill) tasks can never skip planning (skip_plan) or auto-finish
+// (auto_publish) — planning always runs and the deliverable always gets a human
+// review before merge. skip_plan_review (skip the plan-review step), skip_ai_review,
+// and skip_verify are opt-in even for self-edits — the deliverable gate still holds.
+function buildCreateArgs(
+  t: ProposedTask,
+  projectId: string,
+  depIds: string[],
+): krill.CreateTaskArgs {
+  const prot = isProtected(t.project_key);
+  return {
+    project_id: projectId,
+    name: t.name,
+    description: t.description,
+    priority: t.priority,
+    mode: t.mode,
+    skip_plan: !!t.skip_plan && !prot,
+    skip_plan_review: !!t.bypass,
+    skip_ai_review: !!t.skip_ai_review,
+    skip_verify: t.skip_verify == null ? undefined : !!t.skip_verify,
+    auto_publish: !!t.auto_publish && !prot,
+    depends_on: depIds,
+    acceptance: t.acceptance ?? null,
+  };
+}
+
 // Warn (don't patch): tasks armed for auto-finish are inert in krill unless the
 // project has allow_auto_finish ON. Surface it so the human flips it in krill.
 async function autoFinishWarning(
@@ -220,14 +249,7 @@ async function pushItems(
       continue;
     }
     try {
-      const created = await krill.createTask({
-        project_id: projectId,
-        name: t.name, description: t.description, priority: t.priority, mode: t.mode,
-        skip_plan_review: !!t.bypass && !isProtected(t.project_key),
-        auto_publish: !!t.auto_publish && !isProtected(t.project_key),
-        depends_on: depIds,
-        acceptance: t.acceptance ?? null,
-      });
+      const created = await krill.createTask(buildCreateArgs(t, projectId, depIds));
       const kid = created?.task?.id || created?.id || null;
       if (kid) { nameToId[t.name] = kid; pushedByName.set(t.name, kid); }
       updateProposed(t.id, { status: "pushed", krill_task_id: kid, push_error: null });
@@ -384,17 +406,7 @@ export async function push(id: string, { confirm = false }: { confirm?: boolean 
       depIds = deps.map((n) => pushedByName.get(n)!);
     }
     const armed = !!t.auto_publish && !isProtected(t.project_key);
-    const created = await krill.createTask({
-      project_id: projectId,
-      name: t.name,
-      description: t.description,
-      priority: t.priority,
-      mode: t.mode,
-      skip_plan_review: !!t.bypass && !isProtected(t.project_key),
-      auto_publish: armed,
-      depends_on: depIds,
-      acceptance: t.acceptance ?? null,
-    });
+    const created = await krill.createTask(buildCreateArgs(t, projectId, depIds));
     const warning = armed
       ? await autoFinishWarning(projectId, t.project_key || "", 1)
       : undefined;

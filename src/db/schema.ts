@@ -43,8 +43,18 @@ export const proposedTasks = sqliteTable(
     // concrete, runnable assertion (e.g. "after a test-mode checkout,
     // tenants.plan = the bought tier"). NULL = krill falls back to plan/checklist.
     acceptance: text("acceptance"),
+    // bypass == krill's skip_plan_review (plan runs, human plan-review skipped).
+    // Kept under the legacy name to avoid a rename across the push path.
     bypass: integer("bypass", { mode: "boolean" }).notNull().default(false),
     auto_publish: integer("auto_publish", { mode: "boolean" }).notNull().default(false),
+    // krill execution toggles, carried per task and applied at push.
+    // skip_plan: no PLANNING stage at all (picker routes TODO→IMPLEMENTING).
+    skip_plan: integer("skip_plan", { mode: "boolean" }).notNull().default(false),
+    // skip_ai_review: skip krill's automated AI-REVIEW gate.
+    skip_ai_review: integer("skip_ai_review", { mode: "boolean" }).notNull().default(false),
+    // skip_verify: NULL = inherit krill's mode default (dev verifies, non-dev
+    // skips); true/false = explicit override.
+    skip_verify: integer("skip_verify", { mode: "boolean" }),
     deps: text("deps").notNull().default("[]"), // JSON: sibling task names (B2)
     // Short handle (1-3 words, e.g. "stripe", "migration") for compact tracking
     // and dependency labels in the UI.
