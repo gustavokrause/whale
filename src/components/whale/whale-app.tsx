@@ -834,6 +834,12 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
     load();
     onChange();
   };
+  const delGroup = async (key: string, sourceEntryId: string, count: number) => {
+    if (!(await dlg.confirm({ title: "Delete group?", description: `whale-local — deletes ${count} task${count === 1 ? "" : "s"} for this dump. Does not touch krill.`, confirmLabel: "Delete group", confirmVariant: "danger" }))) return;
+    await withBusy("Deleting group", post("/api/proposed/delete-group", { key, source_entry_id: sourceEntryId }));
+    load();
+    onChange();
+  };
   const togglePark = async (id: string, disabled: boolean) => {
     await j(`/api/proposed/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ disabled }) });
     load();
@@ -980,15 +986,26 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                     )}
                     <span className="text-text-3">· {g.tasks.length} task{g.tasks.length === 1 ? "" : "s"}</span>
                   </button>
-                  {g.id !== "__none__" && pushable(g.tasks) > 0 && (
-                    <button
-                      className={`${subtleBtn} ${dis} shrink-0`}
-                      onClick={() => setReview({ tasks: g.tasks.filter((p) => !p.disabled && ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "group", sourceEntryId: g.id })}
-                      disabled={krillDown}
-                      title={krillDown ? "krill is down — can't push" : "Push this dump's tasks to krill (dependency-ordered)"}
-                    >
-                      Push group <ArrowRight className="h-3 w-3" />
-                    </button>
+                  {g.id !== "__none__" && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        className={`${subtleBtn} shrink-0 !text-danger hover:!text-danger`}
+                        onClick={() => delGroup(key, g.id, g.tasks.length)}
+                        title="Delete all tasks in this dump (whale-local, does not touch krill)"
+                      >
+                        Delete group
+                      </button>
+                      {pushable(g.tasks) > 0 && (
+                        <button
+                          className={`${subtleBtn} ${dis} shrink-0`}
+                          onClick={() => setReview({ tasks: g.tasks.filter((p) => !p.disabled && ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "group", sourceEntryId: g.id })}
+                          disabled={krillDown}
+                          title={krillDown ? "krill is down — can't push" : "Push this dump's tasks to krill (dependency-ordered)"}
+                        >
+                          Push group <ArrowRight className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 {!collapsedGroups.has(g.id) && (
