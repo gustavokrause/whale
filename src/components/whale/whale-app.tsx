@@ -1142,6 +1142,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
           open
           tasks={review.tasks}
           projectKey={review.key}
+          kind={review.kind}
           busy={sending}
           onCancel={() => setReview(null)}
           onConfirm={sendReview}
