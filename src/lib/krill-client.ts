@@ -89,7 +89,12 @@ export type CreateTaskArgs = {
   description?: string;
   priority?: string;
   mode?: string;
+  skip_plan?: boolean;
   skip_plan_review?: boolean;
+  skip_ai_review?: boolean;
+  // undefined = let krill apply its mode default (dev verifies, non-dev skips);
+  // true/false = explicit override.
+  skip_verify?: boolean;
   auto_publish?: boolean;
   depends_on?: string[];
   acceptance?: string | null;
@@ -103,7 +108,11 @@ export async function createTask(args: CreateTaskArgs) {
     description: args.description,
     priority: args.priority,
     mode: args.mode,
+    skip_plan: !!args.skip_plan,
     skip_plan_review: !!args.skip_plan_review,
+    skip_ai_review: !!args.skip_ai_review,
+    // Only send when explicit — omitting lets krill's POST route default by mode.
+    ...(args.skip_verify === undefined ? {} : { skip_verify: !!args.skip_verify }),
     auto_publish: !!args.auto_publish,
     depends_on: Array.isArray(args.depends_on) ? args.depends_on : [],
     // Definition-of-done for krill's VERIFYING stage (null when not authored).

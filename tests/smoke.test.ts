@@ -232,7 +232,10 @@ function mockKrill() {
     calls.push({ method, url: u, body });
     let data: unknown = {};
     if (u.includes("/api/health")) data = {};
-    else if (u.includes("/api/projects")) data = [{ id: "proj1", slug: "ZT", name: "arqtrack", folder_path: "/x", has_repo: true }];
+    else if (u.includes("/api/projects")) data = [
+      { id: "proj1", slug: "ZT", name: "arqtrack", folder_path: "/x", has_repo: true },
+      { id: "projK", slug: "KR", name: "krill", folder_path: "/k", has_repo: true },
+    ];
     else if (method === "POST" && u.includes("/api/tasks")) data = { id: `kid-${++seq}` };
     else if (u.includes("/api/tasks")) data = { tasks: [] };
     return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
@@ -354,3 +357,71 @@ async function krillIdFor(aPost: { body?: Record<string, unknown> }): Promise<st
   const a = listProposed().find((t) => t.name === aPost.body!.name)!;
   return a.krill_task_id as string;
 }
+
+test("push: all krill toggles carry into the payload (non-protected project)", async () => {
+  resetDb();
+  const k = mockKrill();
+  try {
+    const t = addProposed({ project_key: "arqtrack", name: "toggles", bypass: true, auto_publish: true });
+    updateProposed(t.id, { skip_plan: true, skip_ai_review: true, skip_verify: true });
+    const r = await push(t.id, { confirm: true });
+    assert.equal(r.pushed, true, "task pushes");
+    const body = k.posts().at(-1)!.body!;
+    assert.equal(body.skip_plan, true, "skip_plan carried");
+    assert.equal(body.skip_plan_review, true, "skip_plan_review (bypass) carried");
+    assert.equal(body.skip_ai_review, true, "skip_ai_review carried");
+    assert.equal(body.skip_verify, true, "skip_verify carried when explicit");
+    assert.equal(body.auto_publish, true, "auto_publish carried");
+  } finally {
+    k.restore();
+  }
+});
+
+test("push: skip_verify omitted from payload when null (krill defaults by mode)", async () => {
+  resetDb();
+  const k = mockKrill();
+  try {
+    const t = addProposed({ project_key: "arqtrack", name: "verify-auto" });
+    assert.equal(getProposed(t.id)!.skip_verify, null, "skip_verify defaults null");
+    await push(t.id);
+    const body = k.posts().at(-1)!.body!;
+    assert.equal("skip_verify" in body, false, "no skip_verify key — krill applies its mode default");
+  } finally {
+    k.restore();
+  }
+});
+
+test("self-edit guard at push: protected forces skip_plan + auto_publish off; plan-review/AI-review/verify opt-in", async () => {
+  resetDb();
+  const k = mockKrill();
+  try {
+    // Arm every toggle on a krill (protected) task.
+    const t = addProposed({ project_key: "krill", name: "self-edit", bypass: true, auto_publish: true });
+    updateProposed(t.id, { skip_plan: true, skip_ai_review: true, skip_verify: true });
+    const r = await push(t.id, { confirm: true });
+    assert.equal(r.pushed, true, "task pushes");
+    const body = k.posts().at(-1)!.body!;
+    assert.equal(body.skip_plan, false, "guard: planning is forced ON for self-edits");
+    assert.equal(body.auto_publish, false, "guard: auto-finish forced OFF (deliverable gets human review)");
+    // Opt-in for self-edits — the deliverable gate (auto_publish off) still holds.
+    assert.equal(body.skip_plan_review, true, "skip_plan_review honored for self-edits");
+    assert.equal(body.skip_ai_review, true, "skip_ai_review honored for self-edits");
+    assert.equal(body.skip_verify, true, "skip_verify honored for self-edits");
+  } finally {
+    k.restore();
+  }
+});
+
+test("push: skip_verify=false (force on) is sent explicitly so krill verifies even a non-dev task", async () => {
+  resetDb();
+  const k = mockKrill();
+  try {
+    const t = addProposed({ project_key: "arqtrack", name: "force-verify", mode: "non-dev" });
+    updateProposed(t.id, { skip_verify: false });
+    await push(t.id);
+    const body = k.posts().at(-1)!.body!;
+    assert.equal(body.skip_verify, false, "explicit false reaches krill — verify forced on");
+  } finally {
+    k.restore();
+  }
+});
