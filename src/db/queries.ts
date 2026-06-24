@@ -2,7 +2,7 @@
 // db.mjs). Functions mirror the prior API but take no db handle.
 
 import { randomUUID } from "node:crypto";
-import { eq, asc, desc } from "drizzle-orm";
+import { and, eq, asc, desc } from "drizzle-orm";
 import { db } from "./client";
 import { broadcast } from "@/lib/events";
 import { keyToSlug } from "@/lib/context-store";
@@ -179,6 +179,14 @@ export const deleteProposed = (id: string) => {
   const r = db.delete(proposedTasks).where(eq(proposedTasks.id, id)).run();
   broadcast();
   return r;
+};
+
+export const deleteProposedByGroup = (projectKey: string, sourceEntryId: string) => {
+  const r = db.delete(proposedTasks)
+    .where(and(eq(proposedTasks.project_key, projectKey), eq(proposedTasks.source_entry_id, sourceEntryId)))
+    .run();
+  broadcast();
+  return { deleted: r.changes };
 };
 
 /* ---- runtime config (UI-overridable subset; see lib/config.ts) ---- */
