@@ -41,6 +41,7 @@ export function PushReview({
   open,
   tasks,
   projectKey,
+  kind,
   busy,
   onCancel,
   onConfirm,
@@ -48,6 +49,7 @@ export function PushReview({
   open: boolean;
   tasks: ProposedTask[];
   projectKey: string;
+  kind: "single" | "batch" | "group";
   busy?: boolean;
   onCancel: () => void;
   onConfirm: (edits: Record<string, PushEdit>) => void;
@@ -82,14 +84,36 @@ export function PushReview({
   const warnUnarmed = anyAuto && armed === false;
   const warnUnknown = anyAuto && armed === null;
 
+  // Scope, spelled out — so "Push batch" (whole project) can't be mistaken for
+  // "Push group" (one dump). batch across >1 dump gets a loud warning.
+  const n = tasks.length;
+  const dumps = new Set(tasks.map((t) => t.source_entry_id ?? "__none__")).size;
+  const scopeTitle =
+    kind === "batch" ? "Push BATCH — every pushable task in the project"
+    : kind === "group" ? "Push GROUP — this dump only"
+    : "Push task to krill";
+  const scopeDesc =
+    kind === "batch"
+      ? `ALL ${n} pushable in ${projectKey}${dumps > 1 ? ` · spans ${dumps} dumps` : ""}`
+      : kind === "group"
+        ? `this dump only · ${n} task${n === 1 ? "" : "s"} → ${projectKey}`
+        : `${n} task${n === 1 ? "" : "s"} → ${projectKey}`;
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onCancel(); }}>
       <DialogContent
-        title="Review before sending to krill"
-        description={`${tasks.length} task${tasks.length === 1 ? "" : "s"} → ${projectKey}`}
+        title={scopeTitle}
+        description={scopeDesc}
         size="large"
       >
         <DialogBody className="space-y-3">
+          {kind === "batch" && dumps > 1 && (
+            <div className="rounded-sm border border-warning/40 bg-warning/10 text-warning px-3 py-2 text-xs leading-relaxed">
+              ⚠ This is a <b>batch</b> push — all {n} pushable tasks across{" "}
+              <b>{dumps} dumps</b> in {projectKey}. To send just one dump, cancel and
+              use that dump&apos;s <b>Push group</b> button.
+            </div>
+          )}
           {prot && (
             <div className="rounded-sm border border-info/40 bg-info/10 text-info px-3 py-2 text-xs leading-relaxed">
               🛡 <b>{projectKey}</b> is a self-edit target — <b>skip planning</b> and
