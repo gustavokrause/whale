@@ -3,9 +3,9 @@
 How whale turns a project's pending dumps into proposed tasks using the **whole
 ai-team bench** — wisely, not by spawning everyone every time.
 
-> TL;DR: Caio nominates the minimum relevant personas → each proposes tasks only
+> TL;DR: Caio nominates the relevant personas → each proposes tasks only
 > in its specialty (and may nominate others) → the set converges by fixpoint →
-> personas reconcile their own tasks against the shared pile. No numeric caps;
+> Caio merges same-deliverable proposals into the final set. No numeric caps;
 > termination is by natural convergence.
 
 ## Why this exists
@@ -30,14 +30,16 @@ lives in our code, which is what makes it testable and bounded.
 ## The four phases
 
 ```
-                 ┌─────────── src/lib/consensus.ts ───────────┐
-  dumps ─▶ 1. NOMINATE ─▶ 2. PROPOSE ─▶ 3. CONVERGE ─▶ 4. REVISE ─▶ TaskDraft[]
-            (Caio)         (per persona)  (fixpoint)    (monotone)
+                 ┌──────────────── src/lib/consensus.ts ────────────────┐
+  dumps ─▶ 1. NOMINATE ─▶ 2. PROPOSE ─▶ 3. CONVERGE ─▶ 4. SYNTHESIZE ─▶ TaskDraft[]
+            (Caio)         (per persona)  (fixpoint)    (Caio merges)
 ```
 
 1. **NOMINATE** — Caio (AI/Orchestration) reads the work requests and names the
-   persona(s) whose specialty is genuinely required — usually one. Cheap model
-   (`model_route`, default haiku). If Caio names no one valid, it falls back to
+   persona(s) whose specialty is genuinely required — one for a narrow ask,
+   several when the work spans disciplines. Runs on Caio's **routing** model
+   (`model_nominate`, default opus) — routing wisdom is the bottleneck, so it
+   gets the strongest model. If Caio names no one valid, it falls back to
    the Augusto+Maria duo so a dump never plans blind.
 
 2. **PROPOSE** — each nominee proposes tasks **only in its specialty**, tagged
@@ -125,7 +127,7 @@ Both real planners share the rest of the engine knobs:
 | `WHALE_CONSENSUS` | **on** (`!= "0"`) | Legacy toggle; `0` makes the default planner the duo. Superseded by `planner`. |
 | `WHALE_MODEL_NOMINATE` | **opus** | Caio's **routing** model — nomination + refine routing. Routing wisdom (seeing a dump spans Finance+Strategy+Product) is the bottleneck, so it runs on the strongest model. |
 | `model_route` | haiku | Inbox-entry classify (task/context/new_project/ask) — a simpler call, stays cheap. |
-| `model_plan` | sonnet | Propose + revise calls. |
+| `model_plan` | sonnet | Propose + synthesis (merge) calls. |
 
 ### Routing doctrine (don't re-collapse it)
 
@@ -145,12 +147,14 @@ a restart via `PATCH /api/config`. **Rollback** to the duo: set
 
 ### Cost reality
 
-The legacy duo was **one** `claude` spawn per plan. Consensus is **1 (Caio) + N
-proposers + extra nomination rounds + N revisers × passes**. A single-owner dump
-is ~3 spawns; a cross-domain dump can be ~9. Mitigations already in place:
-parallel within each round, haiku for nomination, and skipping revision when only
-one persona spoke. This is the real price of using the whole bench — it's
-flag-gated so you can fall back.
+The legacy duo was **one** `claude` spawn per plan. Consensus is **1 (Caio
+nominate) + N proposers + extra convergence rounds + 1 (Caio completeness sweep,
+cross-domain only) + 1 (Caio synthesis/merge)**. A single-owner dump is ~3
+spawns; a cross-domain dump can be ~9. Mitigations already in place: proposers
+run in parallel within each round, the completeness sweep is skipped for
+`scope=single`, and the synthesis merge is skipped when ≤1 proposal. This is the
+real price of using the whole bench — it's mode-gated (`planner`) so you can fall
+back to `single` or `duo`.
 
 ## Observability
 
@@ -159,7 +163,8 @@ Every proposed task carries:
 - `owner_persona` / `owner_area` — who proposed it (shown as a chip on the
   Proposed tab).
 - `consensus_log` — the full transcript for that plan run (nomination graph +
-  withdrawals), stamped identically on every task of the run. Rendered as the
+  per-persona proposals + the final merge), stamped identically on every task of
+  the run. Events are `nominate` / `propose` / `merge`. Rendered as the
   expandable **"consensus · N personas"** trail in the task's expanded card
   (`ConsensusTrail` in `whale-app.tsx`). Mirrors the `refine_log` pattern.
 
@@ -169,21 +174,23 @@ Every proposed task carries:
 
 | File | Role |
 | --- | --- |
-| `src/lib/consensus.ts` | The orchestration loop (`planConsensus`) + the four phase functions. Completer is injectable for tests. |
-| `src/lib/stages.ts` | `planRealOrConsensus` branches on the flag; `planRealDuo` is the legacy path; `triageAndStore` carries owner + transcript. |
-| `src/lib/config.ts` | `WHALE_CONSENSUS` flag / `config.autonomy.consensus`. |
-| `src/db/schema.ts` + migration `0007_*` | `owner_persona`, `owner_area`, `consensus_log`, `config.consensus`. |
+| `src/lib/consensus.ts` | The orchestration loop (`planConsensus`), the phase functions, the `single` baseline (`planSingle`), and refine routing (`pickRefiner`). Completer is injectable for tests. |
+| `src/lib/stages.ts` | `planRealOrConsensus` branches on the `planner` mode (`single` / `consensus` / `duo`); `planSingle`/`planConsensus` are the real paths, `planRealDuo` is the legacy fallback; `triageAndStore` carries owner + transcript. |
+| `src/lib/config.ts` | `config.planner` mode (`WHALE_PLANNER`) + the legacy `config.autonomy.consensus` (`WHALE_CONSENSUS`). |
+| `src/db/schema.ts` + migrations `0007_*`/`0008_*`/`0009_*` | `owner_persona`, `owner_area`, `consensus_log`, and the `config.consensus` / `config.planner` columns. |
 | `src/components/whale/whale-app.tsx` | Owner chip + `ConsensusTrail`. |
-| `tests/consensus.test.ts` | Scripted-completer tests: convergence, monotone revision, speak-once, duo fallback. |
+| `tests/consensus.test.ts` | Scripted-completer tests: convergence, completeness sweep, synthesis merge (+ empty fallback), speak-once, `planSingle`, `pickRefiner`, duo fallback. |
 
 ## Testing it
 
 `tests/consensus.test.ts` drives `planConsensus` with a **scripted completer**
 (no `claude` spawn), so the loop itself is covered offline: nomination →
-propose+nominate → fixpoint convergence → monotone-revision termination →
-speak-once dedup → empty-nomination duo fallback. Run `npm test`.
+propose+nominate → fixpoint convergence → completeness sweep → synthesis merge
+(same-deliverable folds, distinct slices survive, empty-merge falls back to the
+pile) → speak-once dedup → `planSingle` → `pickRefiner` routing → empty-nomination
+duo fallback. Run `npm test`.
 
 To see it live: set the project's runner to `real`, capture a cross-domain dump
 (e.g. "add paid plans with refunds"), click **Plan**, and open a proposed task —
 the owner chip names who proposed it and the consensus trail shows Caio's
-nomination, each persona's contribution, and any withdrawals.
+nomination, each persona's contribution, and the final merge.

@@ -14,3 +14,6 @@ next-env.d.ts
 
 # playwright MCP scratch (page snapshots + console logs — leaks board/project data)
 .playwright-mcp/
+
+# graphify knowledge-graph output (generated; large HTML + machine-local interpreter paths)
+graphify-out/
