@@ -98,7 +98,20 @@ export type CreateTaskArgs = {
   auto_publish?: boolean;
   depends_on?: string[];
   acceptance?: string | null;
+  // Pre-flight token estimate (sum of krill stage medians for the stages this
+  // task will run). null/omitted = no estimate; the board shows used only.
+  est_tokens?: number | null;
 };
+
+/** Per-stage median token cost from krill (basis for whale's est). Tolerant: {}. */
+export async function getUsageMedians(): Promise<Record<string, number>> {
+  try {
+    const r = await call("GET", "/api/usage/medians");
+    return r?.medians ?? {};
+  } catch {
+    return {};
+  }
+}
 
 /** Create a BACKLOG task. skip_plan_review carries whale's bypass decision. */
 export async function createTask(args: CreateTaskArgs) {
@@ -117,6 +130,8 @@ export async function createTask(args: CreateTaskArgs) {
     depends_on: Array.isArray(args.depends_on) ? args.depends_on : [],
     // Definition-of-done for krill's VERIFYING stage (null when not authored).
     acceptance: args.acceptance ?? null,
+    // Omit when null so krill stores no estimate (vs a misleading 0).
+    ...(args.est_tokens == null ? {} : { est_tokens: args.est_tokens }),
   });
 }
 
