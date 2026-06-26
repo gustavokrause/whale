@@ -34,9 +34,10 @@ function buildCreateArgs(
   t: ProposedTask,
   projectId: string,
   depIds: string[],
+  medians: Record<string, number> = {},
 ): krill.CreateTaskArgs {
   const prot = isProtected(t.project_key);
-  return {
+  const args: krill.CreateTaskArgs = {
     project_id: projectId,
     name: t.name,
     description: t.description,
@@ -50,6 +51,27 @@ function buildCreateArgs(
     depends_on: depIds,
     acceptance: t.acceptance ?? null,
   };
+  args.est_tokens = estimateTokens(args, medians);
+  return args;
+}
+
+// Sum the krill stage medians for the stages this task will actually run, given
+// its resolved flags. Mirrors krill's POST defaulting (skip_verify omitted ⇒
+// dev verifies, non-dev skips). Returns null when there's no median data yet (a
+// fresh fleet) so the board shows "no estimate" instead of a misleading 0.
+function estimateTokens(
+  a: krill.CreateTaskArgs,
+  medians: Record<string, number>,
+): number | null {
+  const m = (s: string) => medians[s] ?? 0;
+  let est = 0;
+  if (!a.skip_plan) est += m("planning");
+  est += m("implementing"); // always runs
+  if (!a.skip_ai_review) est += m("ai_review");
+  const verifies = a.skip_verify === undefined ? a.mode === "dev" : !a.skip_verify;
+  if (verifies) est += m("verify");
+  est += m("publishing"); // always runs
+  return est > 0 ? est : null;
 }
 
 // Warn (don't patch): tasks armed for auto-finish are inert in krill unless the
@@ -230,6 +252,8 @@ async function pushItems(
   const nameToId: Record<string, string> = {};
   const results: { name: string; id?: string | null; depends_on?: string[]; error?: string; deferred?: boolean; blockedBy?: string[] }[] = [];
   const deferredNames = new Set<string>();
+  // Fetch krill's stage medians once for the whole batch (tolerant: {} on error).
+  const medians = await krill.getUsageMedians();
   for (const t of ordered) {
     const deps = JSON.parse(t.deps || "[]") as string[];
     const depIds: string[] = [];
@@ -249,7 +273,7 @@ async function pushItems(
       continue;
     }
     try {
-      const created = await krill.createTask(buildCreateArgs(t, projectId, depIds));
+      const created = await krill.createTask(buildCreateArgs(t, projectId, depIds, medians));
       const kid = created?.task?.id || created?.id || null;
       if (kid) { nameToId[t.name] = kid; pushedByName.set(t.name, kid); }
       updateProposed(t.id, { status: "pushed", krill_task_id: kid, push_error: null });
@@ -322,6 +346,11 @@ export async function refine(team: Team, id: string, input: string) {
     refine_log: JSON.stringify(log),
     owner_persona: r.owner_persona ?? t.owner_persona,
     owner_area: r.owner_area ?? t.owner_area,
+    // Keep acceptance in lockstep with the refined scope: a refine that changes
+    // the deliverable must re-state acceptance, else VERIFYING checks the wrong
+    // bar. Fall back to the current value when the refiner returned none (never
+    // null out a good acceptance).
+    acceptance: r.acceptance?.trim() || t.acceptance,
     status: "proposed",
   });
   canonicalizeProjectDeps(t.project_key); // map handle-deps → task names
@@ -406,7 +435,8 @@ export async function push(id: string, { confirm = false }: { confirm?: boolean 
       depIds = deps.map((n) => pushedByName.get(n)!);
     }
     const armed = !!t.auto_publish && !isProtected(t.project_key);
-    const created = await krill.createTask(buildCreateArgs(t, projectId, depIds));
+    const medians = await krill.getUsageMedians();
+    const created = await krill.createTask(buildCreateArgs(t, projectId, depIds, medians));
     const warning = armed
       ? await autoFinishWarning(projectId, t.project_key || "", 1)
       : undefined;

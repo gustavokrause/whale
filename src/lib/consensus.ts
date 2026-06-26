@@ -96,7 +96,17 @@ const TASK_CONTRACT =
   `must finish FIRST ([] if independent). ADD/CREATE a shared thing → producer runs first, ` +
   `consumers depend on it. REMOVE/DELETE a shared thing → the removal runs LAST, depending on ` +
   `every task that stopped using it (a sink, not a root). MODIFY a shared contract → ` +
-  `sequence producer→consumers. Deps MAY reference EXISTING tasks (including in-flight ones).`;
+  `sequence producer→consumers. Deps MAY reference EXISTING tasks (including in-flight ones).\n` +
+  `COLLISION-SAFETY (tasks run CONCURRENTLY in separate worktrees → parallel merge conflicts): ` +
+  `two tasks that edit the SAME FILE, or both append to a SERIALIZED surface (a DB migrations ` +
+  `directory — each emits a new migration that collides on apply/order, RLS policies on the same ` +
+  `tables, a shared lockfile), must NOT be left independent EVEN WHEN neither needs the other's ` +
+  `result. CHAIN them via depends_on (foundational / highest-risk first, then by priority) so they ` +
+  `land one at a time. Distinct deliverables, SEQUENCED — not merged into one.\n` +
+  `ACTIVATION (merged ≠ live): if a change only takes effect after a SEPARATE deploy/apply step ` +
+  `the repo does NOT automate (edge functions need \`functions deploy\`; migrations need ` +
+  `\`db push\`/a CI apply; a build needs publishing) — propose that activation as its OWN task ` +
+  `depending on the change task(s). A merged PR that is never deployed is NOT done.`;
 
 /** Shared context block (dumps + project context + standing backlog). */
 function contextBlock(ctx: ConsensusContext): string {
@@ -334,7 +344,10 @@ async function synthesize(
     `most-fitting owner (owner_persona + owner_area), and credit the others in the description.\n` +
     `- Tasks that are DISTINCT slices (different deliverables) → keep AS-IS, one owner each.\n` +
     `- NEVER delete a discipline's contribution — fold it in. The final set must cover everything ` +
-    `proposed, with no two tasks editing the same target.\n` +
+    `proposed.\n` +
+    `- SAME deliverable → merge into one. DISTINCT deliverables that touch the SAME FILE/surface ` +
+    `(e.g. two RLS-policy migrations, two edits to one module) → keep BOTH but CHAIN them via ` +
+    `depends_on per COLLISION-SAFETY — never leave same-surface tasks parallel-independent.\n` +
     `- Preserve depends_on, label, acceptance, and source on every task.\n\n` +
     `${TASK_CONTRACT}\n\n` +
     `Return {"tasks":[<final task, each WITH owner_persona and owner_area>...]}.`;

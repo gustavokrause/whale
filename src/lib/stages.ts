@@ -427,6 +427,7 @@ export async function refineProposal(team: Team, current: ProposedTask, input: s
       priority: current.priority,
       mode: current.mode,
       depends_on: JSON.parse(current.deps || "[]"),
+      acceptance: current.acceptance ?? undefined,
     };
   }
   // Route the refine to the right persona instead of always Maria: prefer the
@@ -469,9 +470,14 @@ export async function refineProposal(team: Team, current: ProposedTask, input: s
     `(${refiner?.area || "Product"}). Refine ONE proposed task per the user's input, ` +
     `applying YOUR discipline's judgment. Keep what's good, apply the change, don't ` +
     `invent extra scope. Return ` +
-    `{name, description, priority(P0..P3), mode(dev|non-dev), depends_on:string[]}.`;
+    `{name, description, priority(P0..P3), mode(dev|non-dev), depends_on:string[], acceptance}. ` +
+    `acceptance is the checkable definition-of-done VERIFYING runs against. If your ` +
+    `refine changes the scope or the deliverable, UPDATE acceptance to match it — a ` +
+    `concrete, runnable assertion. If scope is unchanged, return the existing ` +
+    `acceptance verbatim. NEVER leave a stale acceptance that contradicts the ` +
+    `description (it would verify the wrong thing).`;
   const user =
-    `CURRENT TASK:\n${JSON.stringify({ name: current.name, description: current.description, priority: current.priority, mode: current.mode, depends_on: JSON.parse(current.deps || "[]") })}\n\n` +
+    `CURRENT TASK:\n${JSON.stringify({ name: current.name, description: current.description, priority: current.priority, mode: current.mode, depends_on: JSON.parse(current.deps || "[]"), acceptance: current.acceptance })}\n\n` +
     `USER INPUT:\n${input}${backlog}\n\nReturn the updated task JSON.${fileNote}`;
   const out = await completeJSON<TaskDraft>({ system, user, model: config.models.plan, cwd, fileAccess: !!cwd });
   // Re-stamp ownership: a refine can move a task to whoever now owns it.
