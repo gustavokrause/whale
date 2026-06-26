@@ -8,6 +8,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import type { ProposedTask } from "@/db/schema";
+import { HashId } from "@/components/ui/hash-id";
 
 // Mirrors the krill task toggles whale can set at push. `bypass` is krill's
 // skip_plan_review (legacy name). skip_verify: null = inherit krill's mode
@@ -140,7 +141,10 @@ export function PushReview({
               const e = edits[t.id] ?? seedOf(t);
               return (
                 <li key={t.id} className="px-3 py-2.5 space-y-2">
-                  <div className="text-sm font-medium">{t.name}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{t.name}</span>
+                    <HashId id={t.id} />
+                  </div>
                   <div className="text-xs text-text-2">
                     {t.risk_tier || "?"} risk · {t.priority}
                   </div>

@@ -30,6 +30,7 @@ import { useDialog } from "@/components/ui/dialog-provider";
 import { PushReview, type PushEdit } from "@/components/whale/push-review";
 import { BlockersBanner } from "@/components/whale/blockers-banner";
 import { WhaleIcon } from "@/components/app/whale-icon";
+import { HashId } from "@/components/ui/hash-id";
 import type { InboxEntry, ProposedTask } from "@/db/schema";
 
 type Status = {
@@ -547,6 +548,7 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
                       </div>
                     ) : null}
                     <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
+                      <HashId id={e.id} />
                       <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
                         {e.status === "raw" ? "pending" : e.status}
                       </span>
@@ -1047,6 +1049,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                               ) : null}
                               <span className="text-sm font-medium break-words">{p.name}</span>
                             </button>
+                            <HashId id={p.id} />
                             <span className="shrink-0 inline-flex items-center gap-1 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
                               {riskDot(p.risk_tier)} {p.risk_tier || "?"}
                             </span>
