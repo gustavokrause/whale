@@ -107,6 +107,22 @@ test("B3 refine: Input re-evaluates + re-triages + logs the turn", async () => {
   assert.ok(typeof r.flow === "string" && r.flow.length, "flow preview returned");
 });
 
+test("B3 refine: acceptance survives a refine (must not be nulled)", async () => {
+  resetDb();
+  const accept = "CSV export downloads a .csv with all columns";
+  const t = addProposed({
+    project_key: "arqtrack",
+    name: "add export",
+    description: "csv",
+    risk_tier: "medium",
+    acceptance: accept,
+  });
+  const r = await refine(stubTeam as never, t.id, "also support json");
+  // The refine path must carry acceptance through, not drop it — a refined task
+  // with a null/stale acceptance verifies the wrong bar in krill.
+  assert.equal(r.task.acceptance, accept, "acceptance preserved through refine");
+});
+
 test("B4 arm-time confirm: auto-finish push/batch needs a distinct confirm", async () => {
   resetDb();
   const t = addProposed({ project_key: "arqtrack", name: "x", risk_tier: "low", auto_publish: true });
