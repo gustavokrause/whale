@@ -7,11 +7,14 @@
 //                 its name/area, and MAY nominate others on a genuine dependency.
 //   3. CONVERGE   newly-nominated personas run in further rounds until a round
 //                 names nobody new (fixpoint; each persona speaks once — bounded
-//                 by the roster, no arbitrary cap).
-//   4. REVISE     every persona that proposed sees the FULL tagged pile and
-//                 revises ONLY its own tasks (withdraw / merge / re-point deps).
-//                 Monotone: the own-set may shrink but never grow, so total task
-//                 count is non-increasing → the loop reaches a fixpoint.
+//                 by the roster, no arbitrary cap). A completeness SWEEP then pulls
+//                 any discipline that owns part of the work but was never named
+//                 (cross-domain plans only).
+//   4. SYNTHESIZE one Caio merge pass folds same-deliverable proposals into a
+//                 single owned task and passes distinct slices through untouched.
+//                 Replaces the old per-persona REVISE step, which collapsed:
+//                 symmetric personas all deferred and withdrew everything. The
+//                 merge is a librarian, not a judge — it never drops a slice.
 //
 // HARD CONSTRAINT: whale runs each persona as a separate sandboxed `claude` CLI
 // call with the Task tool BLOCKED (runner.ts SANDBOX_DISALLOWED) — personas
@@ -24,7 +27,7 @@ import type { Team, Persona } from "./persona-loader";
 import type { InboxEntry } from "@/db/schema";
 import type { TaskDraft } from "./stages";
 
-// The LLM call, injectable so the orchestration (convergence, monotone revision,
+// The LLM call, injectable so the orchestration (convergence, synthesis merge,
 // transcript) is testable offline without spawning the `claude` CLI.
 export type Completer = typeof completeJSON;
 

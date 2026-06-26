@@ -40,7 +40,7 @@ review in **Proposed** → **Approve** → **Push to krill**.
 ```
 onboard ─▶ CONTEXT.md (per project, background)    dump ─▶ work requests (pending)
                                │                              │
-            PLANNER (Augusto + Maria): context + requests ─▶ proposed tasks
+            PLANNER (consensus bench — Caio routes the roster): context + requests ─▶ proposed tasks
                                │
             TRIAGE (ai-team risk rubric) ─▶ 🟢 bypass / 🟡🔴 review
                                │
@@ -57,7 +57,8 @@ Beyond the core flow, the pipeline also does:
 - **Batch handoff (B2)** — push a project's approved tasks in dependency order,
   wiring krill `depends_on` from the sibling name→id map.
 - **Refine loop (B3)** — Approve / Decline / **Input**; Input re-evaluates one task
-  (Maria) and re-triages, repeatable until you approve.
+  (Caio routes it to the best-fit persona, default the task's owner) and
+  re-triages, repeatable until you approve.
 - **Flow preview** — each proposed task shows where it stops in krill (🔴 full
   review · 🟡 skips plan review · 🟢 auto-finish → DONE).
 - **Arm-time double-confirm (B4)** — pushing a batch that will auto-finish requires

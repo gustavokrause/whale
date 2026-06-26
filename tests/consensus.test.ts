@@ -1,6 +1,6 @@
 // whale — consensus orchestration tests. The dynamic peer-consensus planner is
 // driven by a SCRIPTED completer (no `claude` spawn), so we test the loop itself:
-// Caio nomination → propose+nominate → fixpoint convergence → monotone revision.
+// Caio nomination → propose+nominate → fixpoint convergence → synthesis merge.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
