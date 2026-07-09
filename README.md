@@ -119,6 +119,11 @@ Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PRO
 
 ### Other capabilities
 
+- **Voice regression harness** — `npm run voice-check -- <Persona>` A/B-tests an
+  edited persona against its stored baseline on frozen fixtures (personas
+  hot-reload with no other gate; voice is load-bearing). `--baseline` accepts an
+  intentional change. Fixtures + baselines live in the personas repo
+  (`tests/voice/` — see its README for when/how/why). ~$0.50 per check, metered.
 - **Pre-send review** — Push to krill (single / dump-group / project batch) opens a
   modal to review + override each task's settings, and warns before sending.
 - **Proposed grouping** — proposals group by source dump in execution order, with
