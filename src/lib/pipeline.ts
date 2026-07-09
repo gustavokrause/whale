@@ -10,7 +10,7 @@ import { plan, route, triage, refineProposal, flowPreview, canonicalizeProjectDe
 import { auditComplete } from "./runner";
 import {
   writeContext, listContextKeys, readContext, keyToSlug,
-  writeContextMeta, readContextMeta, gitHead, commitsSince,
+  writeContextMeta, readContextMeta, gitHead, commitsSince, distillToContext,
 } from "./context-store";
 import * as krill from "./krill-client";
 import type { Team } from "./persona-loader";
@@ -102,7 +102,7 @@ export async function onboard(team: Team, key: string) {
     `Sections: Goals, Stack, Structure, Current state, Open questions. No preamble, no code fences.`;
   const user = `Audit the repository in the working directory and output the full CONTEXT.md.`;
   const folder = expandHome(meta.folder_path);
-  const md = await auditComplete({ system, user, model: config.models.plan, cwd: folder });
+  const md = await auditComplete({ system, user, model: config.models.plan, cwd: folder, purpose: "onboard" });
   writeContext(key, md);
   // Record the HEAD we audited against, so we can flag drift later.
   writeContextMeta(key, { head: gitHead(folder), at: Date.now() });
@@ -321,8 +321,29 @@ export async function approve(team: Team, id: string) {
   return { task: t, pushed: false, note: "approved; auto-push off — push manually" };
 }
 
+// C3 WHY capture: fold the user's redirection into the project's
+// "## Standing principles" so the next plan run sees it (the planner injects
+// CONTEXT.md into plan context) instead of re-proposing what was steered away.
+// Best-effort — never fails the refine/reject itself.
+function distillPrinciple(projectKey: string, bullet: string) {
+  try {
+    distillToContext(projectKey, "Standing principles", [bullet]);
+  } catch (err) {
+    console.warn(`principle distiller failed for "${projectKey}":`, err);
+  }
+}
+
 export function reject(id: string) {
-  return updateProposed(id, { status: "rejected" });
+  const t = getProposed(id);
+  const updated = updateProposed(id, { status: "rejected" });
+  if (t) {
+    const date = new Date().toISOString().slice(0, 10);
+    distillPrinciple(
+      t.project_key,
+      `- [${date}] rejected "${t.name}": ${(t.description || "").slice(0, 120)}`,
+    );
+  }
+  return updated;
 }
 
 /** Refine a proposed task from user Input (B3). */
@@ -354,6 +375,12 @@ export async function refine(team: Team, id: string, input: string) {
     status: "proposed",
   });
   canonicalizeProjectDeps(t.project_key); // map handle-deps → task names
+  // The user's own words ARE the principle seed — verbatim, not paraphrased
+  // (voice is load-bearing). Named on the pre-refine task: that's what was redirected.
+  distillPrinciple(
+    t.project_key,
+    `- [${new Date().toISOString().slice(0, 10)}] refined "${t.name}": ${input.slice(0, 300)}`,
+  );
   return { task: getProposed(id) ?? updated, flow: flowPreview(updated) };
 }
 

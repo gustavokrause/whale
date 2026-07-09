@@ -1,8 +1,13 @@
 # whale — build plan
 
 > **Status (2026-06): Phases 0–4 shipped.** This file is the original build plan
-> and remains accurate for the core architecture (capture → distill → plan →
-> triage → route → push, personas, boundaries). The later **autonomy + execution
+> and remains accurate for the core architecture (capture → plan → triage →
+> route → push, personas, boundaries). **Caveat (2026-07): the LLM DISTILLER
+> described below was never built as designed.** CONTEXT.md is written by the
+> one-shot onboarding audit and manual saves; since 2026-07 a mechanical
+> ledger folds plan-run decisions and refine/reject principles into it
+> (merge-aware, preserving "Decisions" / "Standing principles" sections) — but
+> there is no LLM step distilling raw dumps. The later **autonomy + execution
 > work — A1–A3 (krill) and B0–B5 (whale): autonomy ladder, batch/deps, refine loop,
 > onboarding, auto-finish, circuit breaker — is superseded by
 > [`../bridge/CLOSING-THE-CYCLE.md`](../bridge/CLOSING-THE-CYCLE.md)**, the source
@@ -26,7 +31,7 @@ Today krill is "give me a repo/folder → create task → here's a PR." That for
 the human to (a) hold all project context in their head, (b) hand-write every
 task, (c) set every review/bypass flag. The user wants high-level interaction
 only: dump information, set direction, approve the few things that matter —
-across many projects (krill itself, meu veleiro, saas factory, arqtrack, …),
+across many projects (krill itself plus the user's product repos),
 fully operational and as automated as safely possible.
 
 ## 2. Goal
@@ -103,8 +108,10 @@ request "do X" ─▶ ROUTER (uses routing rules) ─┬─▶ task → existing
 ```
 
 - **Capture inbox**: one place, any input. Append-only file/store; never lose raw input.
-- **Distiller**: one LLM step; raw inbox entries → structured living `CONTEXT.md`
-  per project. No vector DB / RAG — markdown fits a single-user context window.
+- **Distiller** (*aspirational — see status caveat above*): one LLM step; raw
+  inbox entries → structured living `CONTEXT.md` per project. What exists
+  today: onboarding audit + mechanical plan-run/refine ledger, no LLM step.
+  No vector DB / RAG — markdown fits a single-user context window.
   Add retrieval only when a living file actually outgrows the window.
 - **Router**: classifies a request to a destination. Multi-project aware (reads
   krill's project registry).
@@ -186,7 +193,8 @@ projects, new personas, and more automation are **config, not rework.**
   backed by a small SQLite table; minimal LAN web box (textarea + recent list,
   phone-friendly like krill). Optional project hint at capture; else the Router
   decides. No mandatory tagging at capture.
-- **Distiller cadence**: **lazy, never cron** — on-demand before a Planner run,
+- **Distiller cadence** (*aspirational — no auto-distill exists; see caveat*):
+  **lazy, never cron** — on-demand before a Planner run,
   plus a debounced auto-distill after new dumps settle. No idle-token burn.
 - **whale runtime**: **separate process** beside krill (own port), talks to
   krill over HTTP, reads `ai-team`. Keeps krill's surface minimal; independent

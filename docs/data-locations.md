@@ -13,6 +13,19 @@ When asked about "tasks" or "proposed tasks", query the SQLite DBs directly. No 
 
 Approved/pushed tasks get an `krill_task_id` and flow into krill.
 
+Not everything is SQLite:
+
+- **`data/context/*.md`** — one living CONTEXT.md per project (+ `global`),
+  written by onboarding/manual saves. Two H2 sections are **distilled ledgers**
+  maintained by whale itself: `## Decisions` (one bullet per proposed task per
+  plan run) and `## Standing principles` (refine/reject WHY capture). Writes are
+  merge-aware — these sections survive a re-onboard or manual save (see
+  `PRESERVED_SECTIONS` in `src/lib/context-store.ts`). `*.meta.json` sidecars
+  hold the audited git HEAD (staleness check).
+- **`data/usage.jsonl`** — append-only LLM metering: one row per real `claude`
+  call (`at`, `model`, `purpose`, token counts, `total_cost_usd`, `session_id`).
+  Read via `GET /api/usage` (last 200 rows) or `tail`/`jq` directly.
+
 ## krill — `krill/data/tasks.db`
 
 Active DB is `data/tasks.db` (set by `DB_PATH` in `krill/.env.local`; `dev.db` is empty, ignore it).
@@ -28,7 +41,7 @@ Active DB is `data/tasks.db` (set by `DB_PATH` in `krill/.env.local`; `dev.db` i
 ```bash
 # whale proposed tasks for a project
 sqlite3 -header -column data/whale.db \
-  "SELECT id,name,priority,risk_tier,status FROM proposed_tasks WHERE project_key='arqtrack';"
+  "SELECT id,name,priority,risk_tier,status FROM proposed_tasks WHERE project_key='my-project';"
 
 # whale store dumps not yet distilled
 sqlite3 -header -column data/whale.db \

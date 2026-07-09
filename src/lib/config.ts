@@ -110,6 +110,10 @@ export const isReal = () => config.runner === "real";
 export function configSnapshot() {
   return {
     runner: config.runner,
+    // Top-level: the UI's Engine section reads c.planner (it's engine config,
+    // not an autonomy dial — it was buried under autonomy and the Settings
+    // page never lit the selected mode).
+    planner: config.planner,
     models: {
       plan: config.models.plan,
       route: config.models.route,
@@ -121,7 +125,6 @@ export function configSnapshot() {
       allowNewProjects: config.autonomy.allowNewProjects,
       planFileAccess: config.autonomy.planFileAccess,
       consensus: config.autonomy.consensus,
-      planner: config.planner,
     },
     envLocked: {
       protected: config.autonomy.protected,

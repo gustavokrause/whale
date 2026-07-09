@@ -71,9 +71,9 @@ test("plan: pending requests become proposed tasks, then marked planned", async 
 test("triage classifies risk correctly", () => {
   const team = { risk: { safeWords: ["pricing", "legal"] } };
   const t = (name: string, project_key: string) => triage(team, { name, description: "", project_key });
-  assert.equal(t("fix typo in readme", "arqtrack").risk_tier, "low");
-  assert.equal(t("add a db migration", "arqtrack").risk_tier, "high", "irreversible keyword");
-  assert.equal(t("change the pricing tier", "arqtrack").risk_tier, "high", "safe-word");
+  assert.equal(t("fix typo in readme", "demo-app").risk_tier, "low");
+  assert.equal(t("add a db migration", "demo-app").risk_tier, "high", "irreversible keyword");
+  assert.equal(t("change the pricing tier", "demo-app").risk_tier, "high", "safe-word");
   assert.equal(t("build a maintenance log", "mv").risk_tier, "medium", "default");
 });
 
@@ -82,12 +82,12 @@ test("autonomy ladder: dial controls how far a task bypasses (B1)", () => {
     triage(stubTeam, { name, description: "", project_key: key }, dial).bypass;
   const low = "fix typo";
   const med = "build a feature";
-  assert.equal(bypass(low, "arqtrack", "conservative"), false);
-  assert.equal(bypass(med, "arqtrack", "conservative"), false);
-  assert.equal(bypass(low, "arqtrack", "balanced"), true);
-  assert.equal(bypass(med, "arqtrack", "balanced"), false);
-  assert.equal(bypass(low, "arqtrack", "aggressive"), true);
-  assert.equal(bypass(med, "arqtrack", "aggressive"), true);
+  assert.equal(bypass(low, "demo-app", "conservative"), false);
+  assert.equal(bypass(med, "demo-app", "conservative"), false);
+  assert.equal(bypass(low, "demo-app", "balanced"), true);
+  assert.equal(bypass(med, "demo-app", "balanced"), false);
+  assert.equal(bypass(low, "demo-app", "aggressive"), true);
+  assert.equal(bypass(med, "demo-app", "aggressive"), true);
 });
 
 test("flow preview reflects the gates a task will hit (B3)", () => {
@@ -99,7 +99,7 @@ test("flow preview reflects the gates a task will hit (B3)", () => {
 
 test("B3 refine: Input re-evaluates + re-triages + logs the turn", async () => {
   resetDb();
-  const t = addProposed({ project_key: "arqtrack", name: "add export", description: "csv", risk_tier: "medium" });
+  const t = addProposed({ project_key: "demo-app", name: "add export", description: "csv", risk_tier: "medium" });
   const r = await refine(stubTeam as never, t.id, "also support json");
   assert.match(r.task.description, /json/, "stub folds the input in");
   assert.equal(JSON.parse(r.task.refine_log).length, 1, "turn logged");
@@ -111,7 +111,7 @@ test("B3 refine: acceptance survives a refine (must not be nulled)", async () =>
   resetDb();
   const accept = "CSV export downloads a .csv with all columns";
   const t = addProposed({
-    project_key: "arqtrack",
+    project_key: "demo-app",
     name: "add export",
     description: "csv",
     risk_tier: "medium",
@@ -125,47 +125,47 @@ test("B3 refine: acceptance survives a refine (must not be nulled)", async () =>
 
 test("B4 arm-time confirm: auto-finish push/batch needs a distinct confirm", async () => {
   resetDb();
-  const t = addProposed({ project_key: "arqtrack", name: "x", risk_tier: "low", auto_publish: true });
+  const t = addProposed({ project_key: "demo-app", name: "x", risk_tier: "low", auto_publish: true });
   const r = await push(t.id);
   assert.equal(r.needsConfirm, true, "single push needs confirm");
   assert.equal(getProposed(t.id)!.status, "proposed", "not pushed yet");
-  const b = await pushBatch(stubTeam as never, "arqtrack");
+  const b = await pushBatch(stubTeam as never, "demo-app");
   assert.equal(b.needsConfirm, true, "batch needs confirm");
 });
 
 test("auto-finish rung (A2): auto_publish only for aggressive + low + non-self-edit", () => {
   const ap = (name: string, key: string, dial: string) =>
     triage(stubTeam, { name, description: "", project_key: key }, dial).auto_publish;
-  assert.equal(ap("fix typo", "arqtrack", "aggressive"), true, "aggressive low -> auto-finish");
-  assert.equal(ap("fix typo", "arqtrack", "balanced"), false, "balanced low -> no auto-finish");
-  assert.equal(ap("build a feature", "arqtrack", "aggressive"), false, "medium never auto-finishes");
+  assert.equal(ap("fix typo", "demo-app", "aggressive"), true, "aggressive low -> auto-finish");
+  assert.equal(ap("fix typo", "demo-app", "balanced"), false, "balanced low -> no auto-finish");
+  assert.equal(ap("build a feature", "demo-app", "aggressive"), false, "medium never auto-finishes");
   assert.equal(ap("fix typo", "whale", "aggressive"), false, "self-edit never auto-finishes");
 });
 
 test("autonomous rung: auto_publish for low+medium, NOT high, NOT self-edit", () => {
   const tri = (name: string, key: string) =>
     triage(stubTeam, { name, description: "", project_key: key }, "autonomous");
-  assert.equal(tri("fix typo", "arqtrack").auto_publish, true, "low -> auto");
-  assert.equal(tri("build a feature", "arqtrack").auto_publish, true, "medium -> auto");
-  assert.equal(tri("add a db migration", "arqtrack").auto_publish, false, "high -> NOT auto");
-  assert.equal(tri("add a db migration", "arqtrack").bypass, false, "high -> full review (no bypass)");
+  assert.equal(tri("fix typo", "demo-app").auto_publish, true, "low -> auto");
+  assert.equal(tri("build a feature", "demo-app").auto_publish, true, "medium -> auto");
+  assert.equal(tri("add a db migration", "demo-app").auto_publish, false, "high -> NOT auto");
+  assert.equal(tri("add a db migration", "demo-app").bypass, false, "high -> full review (no bypass)");
   assert.equal(tri("fix typo", "whale").auto_publish, false, "self-edit never auto");
 });
 
 test("ludicrous rung: auto_publish for EVERY tier except self-edit", () => {
   const ap = (name: string, key: string) =>
     triage(stubTeam, { name, description: "", project_key: key }, "ludicrous").auto_publish;
-  assert.equal(ap("fix typo", "arqtrack"), true, "low -> auto");
-  assert.equal(ap("build a feature", "arqtrack"), true, "medium -> auto");
-  assert.equal(ap("add a db migration", "arqtrack"), true, "high (irreversible) -> auto");
-  assert.equal(ap("change the pricing tier", "arqtrack"), true, "high (safe-word) -> auto");
+  assert.equal(ap("fix typo", "demo-app"), true, "low -> auto");
+  assert.equal(ap("build a feature", "demo-app"), true, "medium -> auto");
+  assert.equal(ap("add a db migration", "demo-app"), true, "high (irreversible) -> auto");
+  assert.equal(ap("change the pricing tier", "demo-app"), true, "high (safe-word) -> auto");
   assert.equal(ap("fix typo", "whale"), false, "self-edit never auto, even ludicrous");
   assert.equal(ap("fix typo", "krill"), false, "self-edit never auto, even ludicrous");
 });
 
 test("self-edit guard: orchestrator tasks never bypass, any dial", () => {
   assert.equal(
-    triage(stubTeam, { name: "fix typo", description: "", project_key: "arqtrack" }, "aggressive").bypass,
+    triage(stubTeam, { name: "fix typo", description: "", project_key: "demo-app" }, "aggressive").bypass,
     true,
   );
   for (const key of config.autonomy.protected) {
@@ -217,7 +217,7 @@ test("blocker queue: file (deduped), list open, resolve", () => {
   assert.equal(b.id, a.id, "deduped to the same row");
   assert.equal(listBlockers("open").length, 1);
   // a different unit -> separate blocker
-  addBlocker({ kind: "mcp_auth", trigger_kind: "plan", trigger_ref: "arqtrack", summary: "other" });
+  addBlocker({ kind: "mcp_auth", trigger_kind: "plan", trigger_ref: "demo-app", summary: "other" });
   assert.equal(listBlockers("open").length, 2);
   resolveBlocker(a.id, "resolved");
   assert.equal(listBlockers("open").length, 1, "resolved drops out of open");
@@ -249,7 +249,7 @@ function mockKrill() {
     let data: unknown = {};
     if (u.includes("/api/health")) data = {};
     else if (u.includes("/api/projects")) data = [
-      { id: "proj1", slug: "ZT", name: "arqtrack", folder_path: "/x", has_repo: true },
+      { id: "proj1", slug: "ZT", name: "demo-app", folder_path: "/x", has_repo: true },
       { id: "projK", slug: "KR", name: "krill", folder_path: "/k", has_repo: true },
     ];
     else if (method === "POST" && u.includes("/api/tasks")) data = { id: `kid-${++seq}` };
@@ -268,7 +268,7 @@ test("WH-11 push(id): refuses when a dependency isn't in krill; passes depends_o
   const k = mockKrill();
   try {
     // dep not in krill -> push_failed, no task created
-    const b = addProposed({ project_key: "arqtrack", name: "B", deps: ["A"] });
+    const b = addProposed({ project_key: "demo-app", name: "B", deps: ["A"] });
     const r1 = await push(b.id);
     assert.equal(r1.pushed, false, "blocked push doesn't go through");
     assert.match(r1.error ?? "", /dependency not in krill/i);
@@ -276,7 +276,7 @@ test("WH-11 push(id): refuses when a dependency isn't in krill; passes depends_o
     assert.equal(k.posts().length, 0, "no krill task created for a dep-blocked push");
 
     // push A first, then B resolves the dep -> depends_on carries A's id
-    const a = addProposed({ project_key: "arqtrack", name: "A" });
+    const a = addProposed({ project_key: "demo-app", name: "A" });
     const rA = await push(a.id);
     assert.equal(rA.pushed, true, "independent task pushes");
     const aKid = getProposed(a.id)!.krill_task_id;
@@ -295,7 +295,7 @@ test("push(id) is idempotent: an already-pushed task is never re-pushed (no dupl
   resetDb();
   const k = mockKrill();
   try {
-    const a = addProposed({ project_key: "arqtrack", name: "A" });
+    const a = addProposed({ project_key: "demo-app", name: "A" });
     const r1 = await push(a.id);
     assert.equal(r1.pushed, true, "first push lands");
     const kid = getProposed(a.id)!.krill_task_id;
@@ -316,7 +316,7 @@ test("acceptance: stored on the proposed task and carried into the krill payload
   const k = mockKrill();
   try {
     const acc = "after a test-mode checkout, tenants.plan = the bought tier";
-    const t = addProposed({ project_key: "arqtrack", name: "checkout persists plan", acceptance: acc });
+    const t = addProposed({ project_key: "demo-app", name: "checkout persists plan", acceptance: acc });
     assert.equal(getProposed(t.id)!.acceptance, acc, "acceptance persisted on the proposed row");
 
     const r = await push(t.id);
@@ -332,7 +332,7 @@ test("acceptance: null when the planner didn't author one", async () => {
   resetDb();
   const k = mockKrill();
   try {
-    const t = addProposed({ project_key: "arqtrack", name: "no acceptance" });
+    const t = addProposed({ project_key: "demo-app", name: "no acceptance" });
     assert.equal(getProposed(t.id)!.acceptance, null, "null when unset");
     await push(t.id);
     assert.equal(k.posts().at(-1)!.body!.acceptance, null, "payload carries null");
@@ -346,9 +346,9 @@ test("WH-11 pushItems: in-batch dep pushes in order; a missing upstream defers, 
   const k = mockKrill();
   try {
     // A + B in the same batch, B depends on A -> both push, B carries A's id
-    addProposed({ project_key: "arqtrack", name: "A" });
-    addProposed({ project_key: "arqtrack", name: "B", deps: ["A"] });
-    const r = await pushBatch(stubTeam as never, "arqtrack");
+    addProposed({ project_key: "demo-app", name: "A" });
+    addProposed({ project_key: "demo-app", name: "B", deps: ["A"] });
+    const r = await pushBatch(stubTeam as never, "demo-app");
     assert.equal(r.pushed, 2, "both push");
     assert.equal(r.deferred ?? 0, 0, "nothing deferred when the dep is in-batch");
     const bPost = k.posts().find((p) => p.body!.name === "B")!;
@@ -357,8 +357,8 @@ test("WH-11 pushItems: in-batch dep pushes in order; a missing upstream defers, 
 
     // C depends on a ghost upstream that's neither in batch nor in krill -> defer
     resetDb();
-    addProposed({ project_key: "arqtrack", name: "C", deps: ["ghost"] });
-    const r2 = await pushBatch(stubTeam as never, "arqtrack");
+    addProposed({ project_key: "demo-app", name: "C", deps: ["ghost"] });
+    const r2 = await pushBatch(stubTeam as never, "demo-app");
     assert.equal(r2.pushed, 0, "C is not pushed with a stripped dep");
     assert.equal(r2.deferred, 1, "C deferred");
     assert.equal(getProposed(listProposed().find((t) => t.name === "C")!.id)!.status, "proposed", "C stays proposed");
@@ -378,7 +378,7 @@ test("push: all krill toggles carry into the payload (non-protected project)", a
   resetDb();
   const k = mockKrill();
   try {
-    const t = addProposed({ project_key: "arqtrack", name: "toggles", bypass: true, auto_publish: true });
+    const t = addProposed({ project_key: "demo-app", name: "toggles", bypass: true, auto_publish: true });
     updateProposed(t.id, { skip_plan: true, skip_ai_review: true, skip_verify: true });
     const r = await push(t.id, { confirm: true });
     assert.equal(r.pushed, true, "task pushes");
@@ -397,7 +397,7 @@ test("push: skip_verify omitted from payload when null (krill defaults by mode)"
   resetDb();
   const k = mockKrill();
   try {
-    const t = addProposed({ project_key: "arqtrack", name: "verify-auto" });
+    const t = addProposed({ project_key: "demo-app", name: "verify-auto" });
     assert.equal(getProposed(t.id)!.skip_verify, null, "skip_verify defaults null");
     await push(t.id);
     const body = k.posts().at(-1)!.body!;
@@ -432,7 +432,7 @@ test("push: skip_verify=false (force on) is sent explicitly so krill verifies ev
   resetDb();
   const k = mockKrill();
   try {
-    const t = addProposed({ project_key: "arqtrack", name: "force-verify", mode: "non-dev" });
+    const t = addProposed({ project_key: "demo-app", name: "force-verify", mode: "non-dev" });
     updateProposed(t.id, { skip_verify: false });
     await push(t.id);
     const body = k.posts().at(-1)!.body!;

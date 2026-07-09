@@ -15,8 +15,10 @@ export async function GET(req: NextRequest) {
   return json({ keys });
 }
 
-// Seed/replace a project's background context by hand (for repo-less idea projects,
+// Seed/update a project's background context by hand (for repo-less idea projects,
 // or to correct an audit). Onboard's textarea hits this; no LLM, no krill needed.
+// Merge-aware: distilled sections (Decisions, Standing principles) survive a save
+// that omits them — see writeContext/mergeContext.
 export async function POST(req: NextRequest) {
   try {
     const b = await req.json();

@@ -446,7 +446,7 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
     const k = await dlg.prompt({
       title: "Make project",
       description: "New project key seeded from this idea.",
-      placeholder: "e.g. arqtrack",
+      placeholder: "e.g. demo-app",
       confirmLabel: "Create",
     });
     const key = k?.trim();
@@ -660,7 +660,7 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
           ref={obkRef}
           value={obk}
           onChange={(e) => setObk(e.target.value)}
-          placeholder="project key (e.g. arqtrack, krill)"
+          placeholder="project key (e.g. demo-app, krill)"
           className="w-full px-3 py-2.5 bg-surface text-text border border-border-strong rounded-lg font-mono"
         />
         <textarea

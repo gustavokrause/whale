@@ -88,10 +88,105 @@ export function readContext(key: string): string {
   return existsSync(f) ? readFileSync(f, "utf8") : "";
 }
 
-export function writeContext(key: string, md: string): string {
+// Sections the distiller owns (folded in over time, not re-derivable from the
+// repo). A re-onboard or manual save must never clobber them.
+export const PRESERVED_SECTIONS = ["Decisions", "Standing principles"];
+
+// H2 sections of a context doc: heading title (lowercased) -> full section text
+// (heading line + body, up to the next "## ").
+function sectionsOf(md: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const heads = [...md.matchAll(/^## .*$/gm)];
+  for (let i = 0; i < heads.length; i++) {
+    const start = heads[i].index!;
+    const end = i + 1 < heads.length ? heads[i + 1].index! : md.length;
+    out.set(heads[i][0].slice(3).trim().toLowerCase(), md.slice(start, end).trimEnd());
+  }
+  return out;
+}
+
+/**
+ * Merge-aware rewrite: the result is `incoming`, plus any PRESERVED_SECTIONS
+ * present in `existing` but absent from `incoming`, appended at the end. If the
+ * incoming doc carries a preserved section itself, the writer explicitly
+ * provided it — incoming's version wins. Pure; exported for tests.
+ */
+export function mergeContext(existing: string, incoming: string): string {
+  const have = sectionsOf(incoming);
+  const prev = sectionsOf(existing);
+  const kept = PRESERVED_SECTIONS
+    .map((s) => s.toLowerCase())
+    .filter((s) => prev.has(s) && !have.has(s))
+    .map((s) => prev.get(s)!);
+  if (!kept.length) return incoming;
+  return [incoming.trimEnd(), ...kept].join("\n\n");
+}
+
+export function writeContext(
+  key: string,
+  md: string,
+  { replace = false }: { replace?: boolean } = {},
+): string {
   mkdirSync(getDir(), { recursive: true });
-  writeFileSync(fileFor(key), normalizeContext(md), "utf8");
+  const incoming = normalizeContext(md);
+  const existing = replace ? "" : readContext(key);
+  writeFileSync(fileFor(key), existing ? mergeContext(existing, incoming) : incoming, "utf8");
   return fileFor(key);
+}
+
+/**
+ * Prepend bullets to an H2 section of a context doc (newest first), capped at
+ * `cap` bullets (oldest dropped). Creates the section at the end of the doc if
+ * absent; every other section is left untouched. Pure; exported for tests.
+ */
+// Dedup key for a ledger bullet: the body without the leading `- [date] `
+// stamp. Re-refining a task with the same words must not burn extra slots of
+// the capped section — one fact, one bullet (newest date wins).
+const bulletBody = (b: string): string =>
+  b.replace(/^- \[\d{4}-\d{2}-\d{2}\]\s*/, "").trim();
+
+export function prependSectionBullets(
+  md: string,
+  section: string,
+  bullets: string[],
+  cap = 40,
+): string {
+  const heading = `## ${section}`;
+  const secs = sectionsOf(md);
+  const existing = secs.get(section.toLowerCase());
+  const oldBullets = existing
+    ? existing.split("\n").slice(1).filter((l) => l.startsWith("- "))
+    : [];
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const b of [...bullets, ...oldBullets]) {
+    const body = bulletBody(b);
+    if (seen.has(body)) continue;
+    seen.add(body);
+    merged.push(b);
+    if (merged.length >= cap) break;
+  }
+  const text = `${heading}\n${merged.join("\n")}`;
+  if (!existing) return `${md.trimEnd()}\n\n${text}`;
+  const start = md.indexOf(existing);
+  return md.slice(0, start) + text + md.slice(start + existing.length);
+}
+
+/**
+ * Fold distilled bullets into a project's context (the C2/C3 ledger). Skips
+ * silently when the project has no CONTEXT.md yet — the distiller must never
+ * create a context file from nothing. Returns whether it wrote.
+ */
+export function distillToContext(
+  key: string,
+  section: string,
+  bullets: string[],
+  cap = 40,
+): boolean {
+  const existing = readContext(key);
+  if (!existing || !bullets.length) return false;
+  writeContext(key, prependSectionBullets(existing, section, bullets, cap));
+  return true;
 }
 
 // Forget a project's background context. whale-local only — never touches the
