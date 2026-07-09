@@ -260,3 +260,9 @@ export async function completeJSON<T = unknown>({
 export function auditComplete({ system, user, model, cwd, purpose }: RunArgs): Promise<string> {
   return runClaude({ system, user, model, cwd, disallowed: AUDIT_DISALLOWED, purpose });
 }
+
+/** Sandboxed free-text completion (no file tools). Voice output must stay
+ *  prose — a JSON contract reshapes the register the D2 harness compares. */
+export function completeText({ system, user, model, purpose }: RunArgs): Promise<string> {
+  return runClaude({ system, user, model, purpose });
+}
