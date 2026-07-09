@@ -61,6 +61,9 @@ export type ConsensusContext = {
   existing: { name: string; label: string | null; state?: string }[];
   cwd?: string;
   fileNote: string;
+  // Owner/persona outcomes of this project's recent plan runs (tracker C7):
+  // fed to the nominate step so routing compounds instead of cold-starting.
+  priorRouting?: string;
 };
 
 // Routing doctrine — the AGENTS.md "routing economy", balanced. The point is to
@@ -109,7 +112,14 @@ const TASK_CONTRACT =
   `ACTIVATION (merged ≠ live): if a change only takes effect after a SEPARATE deploy/apply step ` +
   `the repo does NOT automate (edge functions need \`functions deploy\`; migrations need ` +
   `\`db push\`/a CI apply; a build needs publishing) — propose that activation as its OWN task ` +
-  `depending on the change task(s). A merged PR that is never deployed is NOT done.`;
+  `depending on the change task(s). A merged PR that is never deployed is NOT done.\n` +
+  `ALTITUDE (symptom vs cause): before proposing per-request patches, check whether several ` +
+  `WORK REQUESTS are symptoms of ONE underlying cause — the same subsystem failing repeatedly, ` +
+  `the same class of bug, the same missing guard/test/gate. If so, propose ONE root-cause task ` +
+  `that fixes the CLASS: set "source" to the primary request and "sources":[every other [n] it ` +
+  `supersedes] so those dumps are credited to it. Do NOT also propose the per-symptom patches ` +
+  `unless one is independently urgent — then chain it via depends_on to the cause task. ` +
+  `Name what the recurring failures reveal about the system in the description.`;
 
 /** Shared context block (dumps + project context + standing backlog). */
 function contextBlock(ctx: ConsensusContext): string {
@@ -174,10 +184,17 @@ async function nominate(
     `Return {"scope":"single|multi|broad","nominees":[{"name","area","why"}]}. ` +
     `"why" ties each persona to the part of the work they OWN. Don't nominate yourself ` +
     `unless orchestration is itself the work; don't pad with personas who'd only echo.`;
+  // Routing memory: how this project's recent work was owned. A hint for
+  // sizing/nominating — not a rule; a genuinely new kind of dump should still
+  // route on its own merits.
+  const priorRouting = ctx.priorRouting
+    ? `\n\nPRIOR ROUTING (this project's recent plan runs — hint, not a rule):\n${ctx.priorRouting}`
+    : "";
   const out = await complete<{ scope?: string; nominees?: Nomination[] }>({
     system,
-    user: contextBlock(ctx),
+    user: contextBlock(ctx) + priorRouting,
     model: config.models.nominate,
+    purpose: "consensus:nominate",
   });
   const scope = (out?.scope || "multi").toLowerCase();
   const noms = validNominations(team, out?.nominees || [], new Set());
@@ -226,7 +243,7 @@ export async function pickRefiner(
     `TASK: ${task.name}\nDESCRIPTION: ${task.description || ""}\n` +
     `CURRENT OWNER: ${task.owner_persona || "(none)"}\nUSER INPUT: ${task.input}`;
   try {
-    const out = await complete<{ name?: string }>({ system, user, model: config.models.nominate });
+    const out = await complete<{ name?: string }>({ system, user, model: config.models.nominate, purpose: "refine:route" });
     return persona(team, out?.name || "") || fallback!;
   } catch {
     return fallback!; // routing is best-effort; never block a refine on it
@@ -277,6 +294,7 @@ async function propose(
     model: config.models.plan,
     cwd: ctx.cwd,
     fileAccess: !!ctx.cwd,
+    purpose: "consensus:propose",
   });
   const proposals = (Array.isArray(out) ? out : out?.proposals || []).map((t) => stamp(t, p));
   return { proposals, nominations: out?.nominations || [] };
@@ -317,6 +335,7 @@ async function sweep(
     system,
     user,
     model: config.models.nominate,
+    purpose: "consensus:sweep",
   });
   return validNominations(team, out?.missing || [], spoken);
 }
@@ -365,6 +384,7 @@ async function synthesize(
     model: config.models.plan,
     cwd: ctx.cwd,
     fileAccess: !!ctx.cwd,
+    purpose: "consensus:synthesize",
   });
   const merged = (out?.tasks || []).filter((t) => t && t.name);
   return merged.length ? merged : pile; // safety: never return empty
@@ -377,6 +397,15 @@ async function synthesize(
  * "simplest thing that works" baseline to measure the multi-agent pipeline
  * against. No fan-out, no merge, no sweep. The planner adopts the relevant
  * disciplines itself and tags each task with the owner it judges fits.
+ *
+ * DELIBERATELY THIN (do not "fix"): this control arm injects only name/area
+ * roster lines, while the consensus path injects each persona's FULL
+ * systemPrompt (context.md + rules.md, verbatim — voice is load-bearing).
+ * That asymmetry is the design: it measures "consensus + full persona voice"
+ * against "one strong generalist with labels". Any A/B conclusion drawn from
+ * it therefore confounds fan-out with voice — if you ever need to isolate the
+ * voice variable, add a THIRD arm (single planner + full persona contexts)
+ * rather than fattening this one.
  */
 export async function planSingle(
   team: Team,
@@ -403,6 +432,7 @@ export async function planSingle(
     model: config.models.nominate, // the opus tier
     cwd: ctx.cwd,
     fileAccess: !!ctx.cwd,
+    purpose: "plan:single",
   });
   const drafts = (Array.isArray(out) ? out : out?.tasks || []).filter((t) => t && t.name);
   report(`Single planner produced ${drafts.length} task${drafts.length === 1 ? "" : "s"}`);

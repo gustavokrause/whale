@@ -40,12 +40,24 @@ lives in our code, which is what makes it testable and bounded.
    several when the work spans disciplines. Runs on Caio's **routing** model
    (`model_nominate`, default opus) — routing wisdom is the bottleneck, so it
    gets the strongest model. If Caio names no one valid, it falls back to
-   the Augusto+Maria duo so a dump never plans blind.
+   the Augusto+Maria duo so a dump never plans blind. Nominate also receives a
+   **routing-memory hint** — the owner personas of the project's last 3 plan
+   runs (`priorRoutingNote` in `stages.ts`) — so routing compounds across runs
+   instead of cold-starting. It's injected as a hint, not a rule: a genuinely
+   new kind of dump still routes on its own merits.
 
 2. **PROPOSE** — each nominee proposes tasks **only in its specialty**, tagged
    with `owner_persona` / `owner_area`, and **may nominate others** when planning
    genuinely depends on another discipline. Runs on `model_plan` (default
-   sonnet). Nominees in a round run in parallel.
+   sonnet). Nominees in a round run in parallel. Every proposer (and the
+   synthesis, single, and duo paths) shares one **`TASK_CONTRACT`** — the task
+   schema, dependency-direction rules, collision-safety chaining, activation
+   tasks, and an **ALTITUDE rule** (symptom vs cause): when several work
+   requests are symptoms of one underlying cause, propose ONE root-cause task
+   with `"source"` = the primary request and `"sources":[n, …]` = every other
+   dump it supersedes. whale credits the superseded dumps to the parent task —
+   they're marked **planned**, not `plan_error` (`servedIds` union in
+   `stages.ts` `plan()`).
 
 3. **CONVERGE** — newly-nominated personas run in further rounds until a round
    names nobody new (a **fixpoint**). Each persona **speaks once** per plan run —
@@ -119,6 +131,15 @@ env default `WHALE_PLANNER`:
 | **single** | ~1 opus call, ~1 min | One Opus planner with the whole team's lenses in a single pass (`planSingle`). | Routine dumps — cheap + fast, deeply grounded. |
 | **consensus** | ~9 calls, slower | The multi-agent bench below (nominate → propose → merge). | Big cross-domain work where you want each discipline's distinct slice. |
 | **duo** | 1 call | Legacy Augusto + Maria pair. | Fallback / comparison. |
+
+> **`single` is deliberately thin — do not "fix" it.** It injects only
+> name/area roster lines, while the consensus path injects each persona's FULL
+> system prompt (voice is load-bearing). That asymmetry is the design: it's the
+> control arm measuring "consensus + full persona voice" against "one strong
+> generalist with labels" — so any A/B conclusion confounds fan-out with voice.
+> If you ever need to isolate the voice variable, add a THIRD arm (single
+> planner + full persona contexts) rather than fattening this one. (Docblock on
+> `planSingle` in `consensus.ts`.)
 
 Both real planners share the rest of the engine knobs:
 

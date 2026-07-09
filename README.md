@@ -2,8 +2,9 @@
 
 The strategy brain on top of [krill](../krill). You dump **work requests** per
 project; whale plans them with the [ai-team](../ai-team) personas — grounded in
-each project's living **context** (built by onboarding) — triages what needs your
-review vs. what bypasses, and drives krill to execute.
+each project's living **context** (seeded by onboarding, then grown by a
+merge-safe ledger of plan decisions and review principles) — triages what needs
+your review vs. what bypasses, and drives krill to execute.
 
 > Krill feeds the whale. Krill runs tasks → PRs; whale decides which tasks
 > exist, why, and who reviews them.
@@ -54,6 +55,14 @@ no LLM needed.
 Beyond the core flow, the pipeline also does:
 - **Onboarding (B5)** — audit a code project read-only (`POST /api/onboard`) or
   seed an idea project by hand → its living CONTEXT.md. Awareness, not autonomy.
+- **Context ledger** — every plan run mechanically folds one **Decisions** bullet
+  per proposed task (plan-run id, task, source dump, owner) into the project's
+  CONTEXT.md; refining a task folds the user's verbatim input, and rejecting one
+  folds the task's name + description snippet, into **Standing principles** — so
+  the next plan run sees what was decided and why (capped + deduped; a project
+  with no CONTEXT.md is skipped silently). Context writes are **merge-aware**: a
+  re-onboard or manual save never clobbers those distilled sections
+  (`{replace: true}` is the explicit escape hatch).
 - **Batch handoff (B2)** — push a project's approved tasks in dependency order,
   wiring krill `depends_on` from the sibling name→id map.
 - **Refine loop (B3)** — Approve / Decline / **Input**; Input re-evaluates one task
@@ -77,6 +86,10 @@ whale mirrors krill: it spawns the **Claude Code CLI** (`claude`) on your existi
 Claude Code auth — **no API key, no separate billing**. Planner / router / audit /
 refine then run real Claude (Haiku for route, Sonnet for plan/refine/audit);
 triage stays deterministic. Set `CLAUDE_BIN` if `claude` isn't on PATH.
+Every real call is **metered**: the runner uses `--output-format json` and appends
+model / purpose / tokens / cost per call to `data/usage.jsonl` (`GET /api/usage`
+returns the last 200 rows). Killed or timed-out runs record nothing (known limit).
+`WHALE_CLAUDE_TIMEOUT` sets the per-call timeout (default 240s).
 
 ### Autonomy ladder (B1)
 
@@ -115,6 +128,15 @@ Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PRO
   MCP-auth blockers don't show the captured link (it's single-use + dead); auth the
   MCP once in a live `claude` → `/mcp` session, then Resume.
 - **Plan failures** surface on the dump (no more silent `raw`).
+- **Override-rate metric** — `GET /api/metrics?key=<project>` reports
+  `{total, rejected, refined, refine_events, override_rate}` per plan run + in
+  aggregate: the PLAN.md §9 metric that governs how far to widen autonomy.
+  Documented-crude: computed off `proposed_tasks` (no events table yet), so
+  reject-then-refine under-counts and pre-push flag edits don't count.
+- **Nth-of-class triage floor** — once a project has ≥3 prior proposals sharing
+  a label, the next one of that class forces human review on **every** dial
+  (bypass/auto-finish off): recurring patches get surfaced as cause-fix
+  candidates instead of auto-finishing forever.
 - **Ready-for-krill highlight** — a proposed task whose dependencies are all DONE is
   badged **ready** (per-project count too); still-blocked tasks show what they wait on.
 - **krill-aware push** — Push / Retry / Push batch / Push group disable when krill is

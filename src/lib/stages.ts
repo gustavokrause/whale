@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { isReal, config } from "./config";
 import { completeJSON } from "./runner";
-import { readContext } from "./context-store";
+import { readContext, distillToContext } from "./context-store";
 import * as krill from "./krill-client";
 import { pendingRequests, markEntries, addProposed, listProposed, updateProposed, setEntriesPlanError } from "@/db/queries";
 import { planConsensus, planSingle, pickRefiner, type ConsensusContext } from "./consensus";
@@ -24,6 +24,9 @@ export type TaskDraft = {
   mode?: string;
   depends_on?: string[];
   source?: number; // index of the WORK REQUEST this task primarily serves
+  // Altitude pass (C4): extra WORK REQUEST indexes a root-cause task
+  // supersedes — those dumps are "planned by the parent", not unserved.
+  sources?: number[];
   label?: string; // short handle (1-3 words) for tracking + dep labels
   acceptance?: string; // concrete definition-of-done for krill's VERIFYING stage
   owner_persona?: string; // consensus: persona that proposed this task
@@ -92,6 +95,15 @@ export async function plan(
   // explaining why — instead of silently vanishing into a planned-but-empty
   // black hole (the old bug: markEntries ran unconditionally).
   const servedIds = new Set(proposed.map((p) => p.source_entry_id).filter(Boolean));
+  // Altitude supersede (C4): a root-cause draft lists the additional dumps it
+  // covers in `sources` — those were planned BY THE PARENT task, not dropped.
+  // Without this they'd trip setEntriesPlanError below and read as failures.
+  for (const t of drafts) {
+    for (const n of t.sources ?? []) {
+      const req = typeof n === "number" ? reqs[n] : undefined;
+      if (req) servedIds.add(req.id);
+    }
+  }
   const served = reqs.filter((r) => servedIds.has(r.id));
   const unserved = reqs.filter((r) => !servedIds.has(r.id));
   if (served.length) markEntries(served.map((r) => r.id), "planned");
@@ -100,6 +112,25 @@ export async function plan(
       unserved.map((r) => r.id),
       "Planner proposed no task for this request — likely treated as a duplicate of existing work or out of scope. Review it, edit the text, or re-plan. (It stays here until it produces a task.)",
     );
+  }
+  // C2 distiller — deliberately a MECHANICAL ledger, not an LLM distiller: it
+  // records WHAT was decided this run (each proposed task, its dump, its owner)
+  // into the project's "## Decisions" section, so the next plan run doesn't
+  // re-derive intent from scratch. The WHY capture (user redirections) happens
+  // at refine/reject (C3, pipeline.ts). Deterministic and cheap — no LLM call.
+  // Best-effort: a distiller failure must never fail the plan run.
+  try {
+    const date = new Date().toISOString().slice(0, 10);
+    distillToContext(
+      key,
+      "Decisions",
+      proposed.map(
+        (p) =>
+          `- [${date}] plan-run ${runId}: proposed "${p.name}" (from dump ${p.source_entry_id ?? "n/a"}, owner ${p.owner_persona ?? "n/a"})`,
+      ),
+    );
+  } catch (err) {
+    console.warn(`plan distiller failed for "${key}":`, err);
   }
   return proposed;
 }
@@ -195,7 +226,15 @@ async function planRealOrConsensus(
 ): Promise<{ drafts: TaskDraft[]; transcript: unknown[] }> {
   const { cwd, fileNote } = await resolveFileAccess(key);
   const mode = config.planner; // "consensus" | "single" | "duo"
-  const ctx: ConsensusContext = { key, context, reqs, existing, cwd, fileNote };
+  const ctx: ConsensusContext = {
+    key,
+    context,
+    reqs,
+    existing,
+    cwd,
+    fileNote,
+    priorRouting: priorRoutingNote(key),
+  };
 
   if (mode === "single") {
     const res = await planSingle(team, ctx, undefined, report);
@@ -263,7 +302,11 @@ async function planRealDuo(
     `from features.ts while pages still import it). The teardown task is a SINK, not a root.\n` +
     `- MODIFY a shared contract (rename, signature change): sequence producer→consumers, or change ` +
     `them together if there is no compatibility shim.\n` +
-    `Deps MAY cross requests and MAY reference EXISTING tasks (including in-flight ones).`;
+    `Deps MAY cross requests and MAY reference EXISTING tasks (including in-flight ones).\n` +
+    `ALTITUDE (symptom vs cause): if several WORK REQUESTS are symptoms of ONE underlying cause, ` +
+    `propose ONE root-cause task fixing the class — "source" = the primary request, ` +
+    `"sources":[every other [n] it supersedes]. Skip the per-symptom patches unless one is ` +
+    `independently urgent (then depends_on the cause task).`;
 
   const backlog = existing.length
     ? `\n\nEXISTING TASKS for this project (already in the backlog — don't re-propose the SAME scope; you MAY set depends_on to these EXACT names). Each shows its live state — [in-flight] tasks are still running, so a follow-up that extends one should DEPEND on it, not replace it:\n${existing
@@ -283,8 +326,48 @@ async function planRealDuo(
     model: config.models.plan,
     cwd,
     fileAccess: !!cwd,
+    purpose: "plan:duo",
   });
   return Array.isArray(out) ? out : out.tasks || [];
+}
+
+/**
+ * Owner outcomes of this project's most recent plan runs (tracker C7) — fed to
+ * the consensus nominate step so routing compounds across runs instead of
+ * cold-starting. Derived from proposed rows (owner_persona per plan_run_id),
+ * newest first, capped at 3 runs. Empty string when there is no history.
+ */
+export function priorRoutingNote(key: string, maxRuns = 3): string {
+  const rows = listProposed().filter((p) => p.project_key === key && p.plan_run_id);
+  const byRun = new Map<string, string[]>(); // listProposed is created_at desc → insertion order = newest first
+  for (const r of rows) {
+    const owners = byRun.get(r.plan_run_id!) ?? [];
+    const owner = r.owner_persona?.trim();
+    if (owner && !owners.includes(owner)) owners.push(owner);
+    byRun.set(r.plan_run_id!, owners);
+  }
+  const lines: string[] = [];
+  for (const [run, owners] of byRun) {
+    if (lines.length >= maxRuns) break;
+    if (!owners.length) continue;
+    lines.push(`- run ${run.slice(0, 8)}: owned by ${owners.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+// Nth-of-class floor: past this many prior proposals sharing a label in the
+// same project, the class is RECURRING — the system keeps patching the same
+// thing. Route the Nth one to a human as a cause-fix candidate regardless of
+// risk tier (a recurring trivial patch and a one-off must not triage alike).
+const CLASS_RECURRENCE_FLOOR = 3;
+
+export function classRecurrenceCount(key: string, label: string | null): number {
+  if (!label) return 0;
+  const l = label.trim().toLowerCase();
+  if (!l) return 0;
+  return listProposed().filter(
+    (p) => p.project_key === key && (p.label ?? "").trim().toLowerCase() === l,
+  ).length;
 }
 
 function triageAndStore(
@@ -296,6 +379,18 @@ function triageAndStore(
   consensusLog = "[]",
 ): ProposedTask {
   const tri = triage(team, { ...t, project_key: key });
+
+  // Nth-of-class → human review (tracker C5). Overrides any dial bypass: the
+  // point is surfacing "you keep patching X" before more of the class
+  // auto-finishes, so the human can order a cause-fix instead.
+  const priorOfClass = classRecurrenceCount(key, t.label ?? null);
+  if (priorOfClass >= CLASS_RECURRENCE_FLOOR) {
+    tri.bypass = false;
+    tri.auto_publish = false;
+    tri.rationale =
+      `${tri.rationale}; recurring class "${t.label}" (${priorOfClass} prior proposals) — ` +
+      `routed to human as cause-fix candidate`;
+  }
   // Map the planner's source index to the dump; fall back to the first dump.
   const srcEntry =
     typeof t.source === "number" && reqs[t.source] ? reqs[t.source] : reqs[0];
@@ -411,7 +506,7 @@ async function routeReal(team: Team, entry: RouteEntry, knownKeys: string[] = []
   const user =
     `KNOWN PROJECTS: ${knownKeys.length ? knownKeys.join(", ") : "(none yet)"}\n` +
     `INPUT: ${entry.text}\nPROJECT HINT: ${entry.project_hint || "(none)"}`;
-  return completeJSON<RouteResult>({ system, user, model: config.models.route });
+  return completeJSON<RouteResult>({ system, user, model: config.models.route, purpose: "route" });
 }
 
 const slug = (s: string) =>
@@ -479,7 +574,7 @@ export async function refineProposal(team: Team, current: ProposedTask, input: s
   const user =
     `CURRENT TASK:\n${JSON.stringify({ name: current.name, description: current.description, priority: current.priority, mode: current.mode, depends_on: JSON.parse(current.deps || "[]"), acceptance: current.acceptance })}\n\n` +
     `USER INPUT:\n${input}${backlog}\n\nReturn the updated task JSON.${fileNote}`;
-  const out = await completeJSON<TaskDraft>({ system, user, model: config.models.plan, cwd, fileAccess: !!cwd });
+  const out = await completeJSON<TaskDraft>({ system, user, model: config.models.plan, cwd, fileAccess: !!cwd, purpose: "refine" });
   // Re-stamp ownership: a refine can move a task to whoever now owns it.
   return { ...out, owner_persona: refiner?.name, owner_area: refiner?.area };
 }
