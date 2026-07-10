@@ -61,3 +61,54 @@ export function overrideRate(key: string): {
   }));
   return { key, runs, aggregate: stats(items) };
 }
+
+export type ShippedStats = {
+  done: number; // pushed tasks krill reports DONE
+  with_expected: number; // of those, how many carried an impact hypothesis
+  with_measured: number; // of those, how many have verify-observed numbers
+  measured_ratio: number; // with_measured / done — expect this LOW; ~1.0 means someone is lying
+  impacts: { name: string; expected: string | null; measured: string | null }[];
+};
+
+/**
+ * Value side of the ledger: what actually shipped, with hypotheses and any
+ * verify-observed measurements. Takes the krill task rows (caller fetches —
+ * metrics stays sync/offline-testable).
+ */
+export function shippedImpact(
+  key: string,
+  krillTasks: {
+    id: string;
+    status?: string;
+    expected_impact?: string | null;
+    measured_impact?: string | null;
+  }[],
+): ShippedStats {
+  const byId = new Map(krillTasks.map((t) => [t.id, t]));
+  const done = listProposed().filter((t) => {
+    if (t.project_key !== key || t.status !== "pushed" || !t.krill_task_id) return false;
+    return byId.get(t.krill_task_id)?.status === "DONE";
+  });
+  const impacts = done.map((t) => {
+    const k = byId.get(t.krill_task_id!)!;
+    let measured: string | null = null;
+    try {
+      const ms = k.measured_impact ? (JSON.parse(k.measured_impact) as { metric: string; before?: string; after: string }[]) : [];
+      if (ms.length) measured = ms.map((m) => `${m.metric} ${m.before ? `${m.before} → ` : ""}${m.after}`).join("; ");
+    } catch { /* malformed — treat as unmeasured */ }
+    return {
+      name: t.name,
+      expected: (k.expected_impact ?? t.expected_impact)?.trim() || null,
+      measured,
+    };
+  });
+  const with_expected = impacts.filter((i) => i.expected).length;
+  const with_measured = impacts.filter((i) => i.measured).length;
+  return {
+    done: impacts.length,
+    with_expected,
+    with_measured,
+    measured_ratio: impacts.length ? with_measured / impacts.length : 0,
+    impacts,
+  };
+}

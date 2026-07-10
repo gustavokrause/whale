@@ -20,6 +20,7 @@ export type PushEdit = {
   skip_ai_review: boolean;
   skip_verify: boolean | null;
   auto_publish: boolean;
+  expected_impact: string;
 };
 
 const btn =
@@ -32,6 +33,7 @@ const seedOf = (t: ProposedTask): PushEdit => ({
   skip_ai_review: !!t.skip_ai_review,
   skip_verify: t.skip_verify ?? null,
   auto_publish: !!t.auto_publish,
+  expected_impact: t.expected_impact ?? "",
 });
 
 // Pre-send review: shows whale's suggested krill settings per task, lets you
@@ -148,6 +150,19 @@ export function PushReview({
                   <div className="text-xs text-text-2">
                     {t.risk_tier || "?"} risk · {t.priority}
                   </div>
+                  <label className="block text-xs">
+                    <span className="inline-flex items-center gap-1.5">
+                      Expected impact{" "}
+                      <span className="text-text-3">hypothesis — what improves, measured how; blank is fine</span>
+                    </span>
+                    <input
+                      type="text"
+                      value={e.expected_impact}
+                      onChange={(ev) => set(t.id, { expected_impact: ev.target.value })}
+                      placeholder="e.g. checkout errors drop, measured by error rate in logs"
+                      className="mt-1 w-full bg-surface-2 border border-border rounded px-1.5 py-1"
+                    />
+                  </label>
                   <div className="flex flex-wrap gap-4 text-xs items-center">
                     <label className="inline-flex items-center gap-1.5">
                       Mode

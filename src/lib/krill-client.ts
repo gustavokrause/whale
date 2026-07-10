@@ -98,6 +98,7 @@ export type CreateTaskArgs = {
   auto_publish?: boolean;
   depends_on?: string[];
   acceptance?: string | null;
+  expected_impact?: string | null;
   // Pre-flight token estimate (sum of krill stage medians for the stages this
   // task will run). null/omitted = no estimate; the board shows used only.
   est_tokens?: number | null;
@@ -130,6 +131,7 @@ export async function createTask(args: CreateTaskArgs) {
     depends_on: Array.isArray(args.depends_on) ? args.depends_on : [],
     // Definition-of-done for krill's VERIFYING stage (null when not authored).
     acceptance: args.acceptance ?? null,
+    expected_impact: args.expected_impact ?? null,
     // Omit when null so krill stores no estimate (vs a misleading 0).
     ...(args.est_tokens == null ? {} : { est_tokens: args.est_tokens }),
   });
@@ -163,7 +165,15 @@ export async function consumeFollowup(id: string): Promise<void> {
 }
 
 /** All krill tasks (id + status), for plan-time in-flight awareness. Tolerant: []. */
-export async function listTasks(): Promise<{ id: string; status?: string }[]> {
+export async function listTasks(): Promise<
+  {
+    id: string;
+    status?: string;
+    expected_impact?: string | null;
+    measured_impact?: string | null;
+    tokens_used?: number;
+  }[]
+> {
   try {
     const r = await call("GET", "/api/tasks");
     return Array.isArray(r) ? r : r?.tasks || [];

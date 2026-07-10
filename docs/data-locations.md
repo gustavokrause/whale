@@ -18,7 +18,9 @@ Not everything is SQLite:
 - **`data/context/*.md`** — one living CONTEXT.md per project (+ `global`),
   written by onboarding/manual saves. Two H2 sections are **distilled ledgers**
   maintained by whale itself: `## Decisions` (one bullet per proposed task per
-  plan run) and `## Standing principles` (refine/reject WHY capture). Writes are
+  plan run), `## Standing principles` (refine/reject WHY capture) and
+`## Shipped impact` (DONE tasks: expected hypothesis · measured evidence ·
+token cost). Writes are
   merge-aware — these sections survive a re-onboard or manual save (see
   `PRESERVED_SECTIONS` in `src/lib/context-store.ts`). `*.meta.json` sidecars
   hold the audited git HEAD (staleness check).

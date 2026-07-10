@@ -50,6 +50,7 @@ function buildCreateArgs(
     auto_publish: !!t.auto_publish && !prot,
     depends_on: depIds,
     acceptance: t.acceptance ?? null,
+    expected_impact: t.expected_impact ?? null,
   };
   args.est_tokens = estimateTokens(args, medians);
   return args;
@@ -372,6 +373,9 @@ export async function refine(team: Team, id: string, input: string) {
     // bar. Fall back to the current value when the refiner returned none (never
     // null out a good acceptance).
     acceptance: r.acceptance?.trim() || t.acceptance,
+    // Same rule for the impact hypothesis — a refined scope may change why the
+    // task matters; keep the old hypothesis when the refiner returns none.
+    expected_impact: r.expected_impact?.trim() || t.expected_impact,
     status: "proposed",
   });
   canonicalizeProjectDeps(t.project_key); // map handle-deps → task names
@@ -396,13 +400,50 @@ export type EnrichedProposed = ProposedTask & { krill_status?: string | null };
  */
 export async function enrichPushed(items: ProposedTask[]): Promise<EnrichedProposed[]> {
   if (!(await krill.ping())) return items;
-  // One bulk fetch → id→status map, instead of an N-task getTask fan-out.
-  const statusById = new Map(
-    (await krill.listTasks()).map((t) => [t.id, t.status ?? null]),
-  );
+  // One bulk fetch → id→task map, instead of an N-task getTask fan-out.
+  const krillTasks = await krill.listTasks();
+  const byId = new Map(krillTasks.map((t) => [t.id, t]));
+
+  // Shipped-impact ledger (value counterpart of the Decisions fold): a pushed
+  // task observed DONE gets one bullet in the project's "## Shipped impact" —
+  // expected hypothesis · measured evidence (or n/a) · token cost. Idempotent:
+  // skipped when the task already appears in the section; the ledger's
+  // body-dedup backstops that. Best-effort — never breaks the board render.
+  for (const t of items) {
+    if (!t.krill_task_id || t.status !== "pushed") continue;
+    const k = byId.get(t.krill_task_id);
+    if (!k || k.status !== "DONE") continue;
+    try {
+      const ctx = readContext(t.project_key);
+      if (!ctx || ctx.includes(`"${t.name}" —`)) continue;
+      let measured = "n/a";
+      if (k.measured_impact) {
+        try {
+          const ms = JSON.parse(k.measured_impact) as {
+            metric: string;
+            before?: string;
+            after: string;
+          }[];
+          if (ms.length) {
+            measured = ms
+              .map((m) => `${m.metric} ${m.before ? `${m.before} → ` : ""}${m.after}`)
+              .join("; ");
+          }
+        } catch { /* malformed — keep n/a */ }
+      }
+      const date = new Date().toISOString().slice(0, 10);
+      const tokens = k.tokens_used ? ` · ${Math.round(k.tokens_used / 1000)}k tokens` : "";
+      distillToContext(t.project_key, "Shipped impact", [
+        `- [${date}] "${t.name}" — expected: ${(k.expected_impact ?? t.expected_impact)?.trim() || "n/a"} · measured: ${measured}${tokens}`,
+      ]);
+    } catch (err) {
+      console.warn(`shipped-impact fold failed for "${t.name}":`, err);
+    }
+  }
+
   return items.map((t) =>
     t.krill_task_id && (t.status === "pushed" || t.status === "push_failed")
-      ? { ...t, krill_status: statusById.get(t.krill_task_id) ?? null }
+      ? { ...t, krill_status: byId.get(t.krill_task_id)?.status ?? null }
       : t,
   );
 }

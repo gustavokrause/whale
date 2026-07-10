@@ -25,6 +25,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const out: Record<string, unknown> = {};
   if (b.mode === "dev" || b.mode === "non-dev") out.mode = b.mode;
   if (typeof b.priority === "string" && /^P[0-3]$/.test(b.priority)) out.priority = b.priority;
+  // Impact hypothesis is free text; blank means "no articulable impact" → null.
+  if ("expected_impact" in b)
+    out.expected_impact =
+      typeof b.expected_impact === "string" && b.expected_impact.trim() ? b.expected_impact.trim() : null;
   if ("bypass" in b) out.bypass = !!b.bypass;
   if ("skip_plan" in b) out.skip_plan = !!b.skip_plan && !prot;
   if ("auto_publish" in b) out.auto_publish = !!b.auto_publish && !prot;

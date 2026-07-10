@@ -92,7 +92,14 @@ const ECONOMY =
 // so heterogeneous personas emit a uniform TaskDraft. Mirrors the legacy duo prompt.
 const TASK_CONTRACT =
   `Each task is JSON: {name, description, priority(P0..P3), mode(dev|non-dev), ` +
-  `depends_on: string[], source: number, label: string, acceptance: string}.\n` +
+  `depends_on: string[], source: number, label: string, acceptance: string, ` +
+  `expected_impact: string}.\n` +
+  `- "expected_impact": ONE sentence — what observably improves if this ships, how it ` +
+  `would be measured, why it matters (e.g. "cut listing-page payload ~40%, measured by ` +
+  `build output, so mobile search stops feeling sluggish"). This is a hypothesis, not a ` +
+  `promise — but it must be falsifiable. For P2/P3 housekeeping with no articulable ` +
+  `impact, use "" — an empty field is honest; an invented metric is not. A task where ` +
+  `NO discipline can state an impact is a candidate to drop.\n` +
   `- "source": the [n] index of the WORK REQUEST this task primarily serves.\n` +
   `- "label": a 1-3 word lowercase handle (e.g. "stripe", "migration"); deps reference these.\n` +
   `- "acceptance": a CONCRETE, checkable definition of done a verifier can RUN — name the ` +

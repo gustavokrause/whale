@@ -43,6 +43,9 @@ export const proposedTasks = sqliteTable(
     // concrete, runnable assertion (e.g. "after a test-mode checkout,
     // tenants.plan = the bought tier"). NULL = krill falls back to plan/checklist.
     acceptance: text("acceptance"),
+  // Value-ledger hypothesis: what observably improves if this ships, how it
+  // would be measured, why it matters. Blank is honest for housekeeping.
+  expected_impact: text("expected_impact"),
     // bypass == krill's skip_plan_review (plan runs, human plan-review skipped).
     // Kept under the legacy name to avoid a rename across the push path.
     bypass: integer("bypass", { mode: "boolean" }).notNull().default(false),
