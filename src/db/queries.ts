@@ -122,6 +122,7 @@ type ProposedInput = {
   source_entry_id?: string | null;
   label?: string | null;
   acceptance?: string | null;
+  expected_impact?: string | null;
   owner_persona?: string | null;
   owner_area?: string | null;
   consensus_log?: string | null; // JSON transcript, stamped per plan run
@@ -144,6 +145,7 @@ export function addProposed(t: ProposedInput): ProposedTask {
       deps: JSON.stringify(Array.isArray(t.deps) ? t.deps : []),
       label: t.label ?? null,
       acceptance: t.acceptance ?? null,
+    expected_impact: t.expected_impact ?? null,
       owner_persona: t.owner_persona ?? null,
       owner_area: t.owner_area ?? null,
       consensus_log: t.consensus_log ?? "[]",

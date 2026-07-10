@@ -48,3 +48,33 @@ test("overrideRate: per-run and aggregate math over seeded rows", () => {
     db.delete(proposedTasks).run();
   }
 });
+
+test("shippedImpact: DONE-only, measured parsing, honest ratio", async () => {
+  const { shippedImpact } = await import("../src/lib/metrics");
+  db.delete(proposedTasks).run();
+  try {
+    const a = addProposed({ project_key: "ship", name: "perf cut", expected_impact: "cut payload 40%" });
+    const b = addProposed({ project_key: "ship", name: "docs fix" });
+    const c = addProposed({ project_key: "ship", name: "still running" });
+    updateProposed(a.id, { status: "pushed", krill_task_id: "K-1" });
+    updateProposed(b.id, { status: "pushed", krill_task_id: "K-2" });
+    updateProposed(c.id, { status: "pushed", krill_task_id: "K-3" });
+
+    const s = shippedImpact("ship", [
+      { id: "K-1", status: "DONE", expected_impact: "cut payload 40%", measured_impact: JSON.stringify([{ metric: "payload", before: "812 KB", after: "486 KB" }]) },
+      { id: "K-2", status: "DONE", measured_impact: null },
+      { id: "K-3", status: "IMPLEMENTING" },
+    ]);
+
+    assert.equal(s.done, 2, "only DONE krill tasks count");
+    assert.equal(s.with_expected, 1);
+    assert.equal(s.with_measured, 1);
+    assert.equal(s.measured_ratio, 0.5);
+    const perf = s.impacts.find((i) => i.name === "perf cut")!;
+    assert.equal(perf.measured, "payload 812 KB → 486 KB");
+    const docs = s.impacts.find((i) => i.name === "docs fix")!;
+    assert.equal(docs.measured, null, "unmeasured stays null — never invented");
+  } finally {
+    db.delete(proposedTasks).run();
+  }
+});

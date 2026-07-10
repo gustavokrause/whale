@@ -90,7 +90,7 @@ export function readContext(key: string): string {
 
 // Sections the distiller owns (folded in over time, not re-derivable from the
 // repo). A re-onboard or manual save must never clobber them.
-export const PRESERVED_SECTIONS = ["Decisions", "Standing principles"];
+export const PRESERVED_SECTIONS = ["Decisions", "Standing principles", "Shipped impact"];
 
 // H2 sections of a context doc: heading title (lowercased) -> full section text
 // (heading line + body, up to the next "## ").

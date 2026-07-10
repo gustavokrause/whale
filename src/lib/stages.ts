@@ -29,6 +29,7 @@ export type TaskDraft = {
   sources?: number[];
   label?: string; // short handle (1-3 words) for tracking + dep labels
   acceptance?: string; // concrete definition-of-done for krill's VERIFYING stage
+  expected_impact?: string; // one-sentence impact hypothesis (what improves, measured how, why it matters)
   owner_persona?: string; // consensus: persona that proposed this task
   owner_area?: string; // consensus: that persona's area
 };
@@ -281,7 +282,8 @@ async function planRealDuo(
     `Give each a short "label": a 1-3 word lowercase handle to track it by (e.g. "stripe", "migration", "trial-ui"); deps reference these. ` +
     `Give each an "acceptance": a CONCRETE, checkable definition of done that a verifier can RUN to prove the task works — name the observable end state, not the steps. ` +
     `Prefer a runnable assertion over prose: e.g. "after a test-mode checkout, tenants.plan = the bought tier and period_end is set", "GET /api/x returns 200 with field y", "npm test passes incl. a new test for Z". For non-dev tasks, make it the deliverable's bar (e.g. "doc covers cases A, B, C with examples"). ` +
-    `Each task: {name, description, priority(P0..P3), mode(dev|non-dev), depends_on: string[], source: number, label: string, acceptance: string}.\n\n` +
+    `Give each an "expected_impact": ONE sentence — what observably improves if this ships, how it would be measured, why it matters. A falsifiable hypothesis, not a promise; "" is honest for housekeeping with no articulable impact — never invent a metric. ` +
+    `Each task: {name, description, priority(P0..P3), mode(dev|non-dev), depends_on: string[], source: number, label: string, acceptance: string, expected_impact: string}.\n\n` +
     `## Every request must produce work\n` +
     `Each WORK REQUEST must yield at least one task UNLESS it is already fully covered by an ` +
     `EXISTING task with the SAME scope. "Same scope" means same change to the same target — NOT ` +
@@ -409,6 +411,7 @@ function triageAndStore(
     auto_publish: tri.auto_publish,
     deps: Array.isArray(t.depends_on) ? t.depends_on : [],
     acceptance: t.acceptance?.trim() || null,
+    expected_impact: t.expected_impact?.trim() || null,
     owner_persona: t.owner_persona?.trim() || null,
     owner_area: t.owner_area?.trim() || null,
     consensus_log: consensusLog,

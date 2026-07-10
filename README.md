@@ -138,6 +138,15 @@ Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PRO
   aggregate: the PLAN.md §9 metric that governs how far to widen autonomy.
   Documented-crude: computed off `proposed_tasks` (no events table yet), so
   reject-then-refine under-counts and pre-push flag edits don't count.
+- **Impact ledger (value side of the cost meter)** — the planner writes an
+  `expected_impact` hypothesis per task (what improves, measured how; blank is
+  honest for housekeeping — a task no discipline can justify is a candidate to
+  drop). It rides the push to krill, leads the PR body, and krill's VERIFYING
+  may attach observed before/after `measurements` (evidence only, never
+  estimates, never a gate). DONE tasks fold into the project's
+  `## Shipped impact` context section, and `/api/metrics` gains a `shipped`
+  block — expect `measured_ratio` LOW; ~1.0 means something is inventing
+  numbers.
 - **Nth-of-class triage floor** — once a project has ≥3 prior proposals sharing
   a label, the next one of that class forces human review on **every** dial
   (bypass/auto-finish off): recurring patches get surfaced as cause-fix

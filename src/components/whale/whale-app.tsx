@@ -1082,6 +1082,12 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                               <button className={`${pushBtn} ${dis}`} disabled={krillDown || blockedByDeps} title={krillDown ? "krill is down — can't push" : depBlockTitle} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
                             ) : null}
                           </div>
+                          {/* impact hypothesis — one muted line; blank = housekeeping, show nothing */}
+                          {p.expected_impact?.trim() ? (
+                            <div className="px-3 pb-2 pl-12 text-xs text-info truncate" title={p.expected_impact}>
+                              ◆ {p.expected_impact}
+                            </div>
+                          ) : null}
                           {/* expanded detail — description, meta, rationale, secondary actions */}
                           {open && (
                             <div className="p-4 pt-1 pl-8 space-y-4">
