@@ -19,8 +19,10 @@ Behavior you'd flip per-session as trust grows:
 | Setting | env today | Why runtime |
 |---|---|---|
 | `runner` | `WHALE_RUNNER` | flip stub↔real without bouncing the server |
+| `planner` (top-level in the snapshot — the Settings Engine section reads `c.planner`, not `autonomy.planner`) | `WHALE_PLANNER` | consensus ↔ single ↔ duo per-run cost/depth tradeoff |
 | `models.plan` | `WHALE_MODEL_PLAN` | tier tuning is iterative |
 | `models.route` | `WHALE_MODEL_ROUTE` | " |
+| `models.nominate` | `WHALE_MODEL_NOMINATE` | routing wisdom tier (default opus) |
 | `autonomy.bypass` | `WHALE_BYPASS` | the core dial — loosen as override rate drops |
 | `autonomy.autoPush` | `WHALE_AUTOPUSH` | toggle staged vs auto-push |
 | `autonomy.allowNewProjects` | `WHALE_ALLOW_NEW_PROJECTS` | propose-new on/off (creation still gated) |
