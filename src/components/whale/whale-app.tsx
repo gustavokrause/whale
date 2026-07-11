@@ -377,6 +377,28 @@ const pushBtn =
 const dangerSm =
   "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-danger border border-danger/40 hover:bg-danger/10";
 
+function usePersistedSet(key: string): [Set<string>, (id: string) => void] {
+  const [set, setSet] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (set.size === 0) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify(Array.from(set)));
+    } catch { /* quota / disabled */ }
+  }, [set, key]);
+  const toggle = useCallback(
+    (id: string) => setSet((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }),
+    []
+  );
+  return [set, toggle];
+}
+
 function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; onChange: () => void; active: boolean; rev: number; jobs: { kind: string; key: string; steps?: string[] }[] }) {
   const isJob = (kind: string, key: string) => jobs.some((x) => x.kind === kind && x.key === key);
   const jobSteps = (key: string) => jobs.find((x) => x.kind === "plan" && x.key === key)?.steps ?? [];
@@ -390,6 +412,7 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
   const [projects, setProjects] = useState<string[]>([]);
   const { push } = useToast();
   const dlg = useDialog();
+  const [collapsedProjects, toggleProject] = usePersistedSet("whale-inbox-projects-collapsed");
 
   const load = useCallback(async () => {
     setEntries((await j("/api/inbox")).entries);
@@ -511,10 +534,15 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
           return (
             <div key={p} className="mt-4 border border-border rounded-lg overflow-hidden">
               <div className="flex items-center justify-between gap-2 px-3 py-2 bg-surface-2 border-b border-border">
-                <span className="text-sm">
+                <button
+                  type="button"
+                  onClick={() => toggleProject(p)}
+                  className="flex items-center gap-1 text-sm hover:text-primary min-w-0 text-left"
+                >
+                  <span className="shrink-0 text-text-3 inline-flex">{collapsedProjects.has(p) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
                   <b>{un ? "unassigned" : p}</b>{" "}
                   <span className="text-text-2">· {un ? "scratchpad — promote items to a project" : `${pendingIn(grouped[p])} pending`}</span>
-                </span>
+                </button>
                 {!un && (
                   <button
                     className={`${actBtn} ${dis} inline-flex items-center gap-1 !px-3 !py-1.5`}
@@ -530,7 +558,7 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
                   </button>
                 )}
               </div>
-              {isJob("plan", p) && jobSteps(p).length > 0 && (
+              {!collapsedProjects.has(p) && isJob("plan", p) && jobSteps(p).length > 0 && (
                 <div className="px-3 py-2 bg-info/5 border-b border-border text-xs font-mono text-text-2 space-y-0.5">
                   <div className="text-[10px] uppercase tracking-wide text-text-3 mb-1">behind the scenes</div>
                   {jobSteps(p).slice(-10).map((s, i, arr) => (
@@ -538,37 +566,39 @@ function InboxTab({ withBusy, onChange, active, rev, jobs }: { withBusy: Busy; o
                   ))}
                 </div>
               )}
-              <ul className="divide-y divide-border">
-                {grouped[p].map((e) => (
-                  <li key={e.id} className="px-3 py-2.5">
-                    {e.text}
-                    {e.plan_error ? (
-                      <div className="mt-1.5 rounded-sm border border-danger/40 bg-danger/10 text-danger text-xs px-2 py-1.5 break-words inline-flex items-start gap-1">
-                        <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" /> <span>Plan failed: {e.plan_error}</span>
+              {!collapsedProjects.has(p) && (
+                <ul className="divide-y divide-border">
+                  {grouped[p].map((e) => (
+                    <li key={e.id} className="px-3 py-2.5">
+                      {e.text}
+                      {e.plan_error ? (
+                        <div className="mt-1.5 rounded-sm border border-danger/40 bg-danger/10 text-danger text-xs px-2 py-1.5 break-words inline-flex items-start gap-1">
+                          <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" /> <span>Plan failed: {e.plan_error}</span>
+                        </div>
+                      ) : null}
+                      <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
+                        <HashId id={e.id} />
+                        <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
+                          {e.status === "raw" ? "pending" : e.status}
+                        </span>
+                        {e.source === "krill-followup" && (
+                          <span className="px-2 rounded-full bg-info/15 text-info" title="Auto-captured follow-up from a krill task">↩ from krill</span>
+                        )}
+                        <span>{new Date(e.created_at).toLocaleString()}</span>
+                        {un && (
+                          <>
+                            <button className={`${ghost} !px-2 !py-1`} onClick={() => moveEntry(e.id)} title="Move to an onboarded project">Move to…</button>
+                            <button className={`${ghost} !px-2 !py-1`} onClick={() => makeProject(e.id, e.text)} title="Seed a new project from this idea">Make project</button>
+                          </>
+                        )}
+                        <button className={`${danger} inline-flex items-center !px-2 !py-1`} title="Delete request" onClick={() => del(e.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
-                    ) : null}
-                    <div className="text-xs text-text-2 mt-1.5 flex gap-2 flex-wrap items-center">
-                      <HashId id={e.id} />
-                      <span className={`px-2 rounded-full ${e.status === "raw" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>
-                        {e.status === "raw" ? "pending" : e.status}
-                      </span>
-                      {e.source === "krill-followup" && (
-                        <span className="px-2 rounded-full bg-info/15 text-info" title="Auto-captured follow-up from a krill task">↩ from krill</span>
-                      )}
-                      <span>{new Date(e.created_at).toLocaleString()}</span>
-                      {un && (
-                        <>
-                          <button className={`${ghost} !px-2 !py-1`} onClick={() => moveEntry(e.id)} title="Move to an onboarded project">Move to…</button>
-                          <button className={`${ghost} !px-2 !py-1`} onClick={() => makeProject(e.id, e.text)} title="Seed a new project from this idea">Make project</button>
-                        </>
-                      )}
-                      <button className={`${danger} inline-flex items-center !px-2 !py-1`} title="Delete request" onClick={() => del(e.id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           );
         })
@@ -736,21 +766,10 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   const [projects, setProjects] = useState<string[]>([]);
   const [review, setReview] = useState<{ tasks: EnrichedTask[]; key: string; kind: "single" | "batch" | "group"; sourceEntryId?: string } | null>(null);
   const [sending, setSending] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const toggleGroup = (id: string) =>
-    setCollapsedGroups((s) => {
-      const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
+  const [collapsedGroups, toggleGroup] = usePersistedSet("whale-proposed-dumps-collapsed");
   // Cards are collapsed by default (scannable list); expand one for full detail.
-  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
-  const toggleCard = (id: string) =>
-    setExpandedCards((s) => {
-      const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
+  const [expandedCards, toggleCard] = usePersistedSet("whale-proposed-cards-expanded");
+  const [collapsedProjects, toggleProject] = usePersistedSet("whale-proposed-projects-collapsed");
   const { push } = useToast();
   const dlg = useDialog();
 
@@ -950,7 +969,12 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
         groupKeys.map((key) => (
           <div key={key} className="mt-4 border border-border rounded-lg overflow-hidden">
             <div className="flex items-center justify-between gap-2 px-3 py-2 bg-surface-2 border-b border-border">
-              <span className="text-sm">
+              <button
+                type="button"
+                onClick={() => toggleProject(key)}
+                className="flex items-center gap-1 text-sm hover:text-primary min-w-0 text-left"
+              >
+                <span className="shrink-0 text-text-3 inline-flex">{collapsedProjects.has(key) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
                 <b>{key}</b>{" "}
                 <span className="text-text-2">
                   · {grouped[key].length} task{grouped[key].length === 1 ? "" : "s"}
@@ -961,7 +985,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                     <CheckCircle2 className="h-3 w-3" /> {readyCount(grouped[key])} ready
                   </span>
                 )}
-              </span>
+              </button>
               <button
                 className={`${subtleBtn} ${dis}`}
                 onClick={() => setReview({ tasks: grouped[key].filter((p) => ["proposed", "approved", "push_failed"].includes(p.status)), key, kind: "batch" })}
@@ -971,7 +995,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                 Push batch <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </div>
-            {dumpGroups(grouped[key]).map((g) => (
+            {!collapsedProjects.has(key) && dumpGroups(grouped[key]).map((g) => (
               <div key={g.id} className={`border-b border-border last:border-b-0 ${!collapsedGroups.has(g.id) ? "bg-surface-2" : ""}`}>
                 <div className={`flex items-center justify-between gap-2 px-3 py-2 border-l-2 border-l-primary/50 ${collapsedGroups.has(g.id) ? "bg-surface" : ""}`}>
                   <button
