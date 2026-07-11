@@ -183,6 +183,19 @@ export async function listTasks(): Promise<
 }
 
 /** Fetch a krill task (for status sync-back). Tolerant: null if missing/unreachable. */
+/** Sum of a krill task's stage costs in USD — the honest per-task scalar
+ *  (raw token sums are ~90% cache re-reads and overstate spend ~10x).
+ *  Tolerant: null when unreachable, so callers can fall back to tokens. */
+export async function getTaskCost(id: string): Promise<number | null> {
+  try {
+    const r = await call("GET", `/api/tasks/${id}/usage`);
+    const stages: { cost_usd?: number }[] = Array.isArray(r) ? r : r?.stages || [];
+    return stages.reduce((a, s) => a + (s.cost_usd ?? 0), 0);
+  } catch {
+    return null;
+  }
+}
+
 export async function getTask(id: string): Promise<{ status?: string } | null> {
   try {
     const r = await call("GET", `/api/tasks/${id}`);
