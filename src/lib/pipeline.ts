@@ -432,9 +432,12 @@ export async function enrichPushed(items: ProposedTask[]): Promise<EnrichedPropo
         } catch { /* malformed — keep n/a */ }
       }
       const date = new Date().toISOString().slice(0, 10);
-      const tokens = k.tokens_used ? ` · ${Math.round(k.tokens_used / 1000)}k tokens` : "";
+      // Cost, not raw tokens: the raw sum is ~90% cache re-reads and reads
+      // ~10x scarier than real spend. Falls back to nothing when unreachable.
+      const cost = await krill.getTaskCost(t.krill_task_id);
+      const costNote = cost != null && cost > 0 ? ` · $${cost.toFixed(2)}` : "";
       distillToContext(t.project_key, "Shipped impact", [
-        `- [${date}] "${t.name}" — expected: ${(k.expected_impact ?? t.expected_impact)?.trim() || "n/a"} · measured: ${measured}${tokens}`,
+        `- [${date}] "${t.name}" — expected: ${(k.expected_impact ?? t.expected_impact)?.trim() || "n/a"} · measured: ${measured}${costNote}`,
       ]);
     } catch (err) {
       console.warn(`shipped-impact fold failed for "${t.name}":`, err);
