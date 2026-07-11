@@ -52,7 +52,10 @@ lives in our code, which is what makes it testable and bounded.
    sonnet). Nominees in a round run in parallel. Every proposer (and the
    synthesis, single, and duo paths) shares one **`TASK_CONTRACT`** — the task
    schema, dependency-direction rules, collision-safety chaining, activation
-   tasks, and an **ALTITUDE rule** (symptom vs cause): when several work
+   tasks, an **`expected_impact`** field (one falsifiable sentence — what
+   observably improves, measured how, why it matters; `""` is honest for
+   housekeeping, an invented metric is not), and an **ALTITUDE rule**
+   (symptom vs cause): when several work
    requests are symptoms of one underlying cause, propose ONE root-cause task
    with `"source"` = the primary request and `"sources":[n, …]` = every other
    dump it supersedes. whale credits the superseded dumps to the parent task —
