@@ -89,11 +89,21 @@ const ECONOMY =
   `forced to work outside its expertise produces shallow, templated output.`;
 
 // The task schema + dependency-direction rules every proposer/reviser must follow,
-// so heterogeneous personas emit a uniform TaskDraft. Mirrors the legacy duo prompt.
-const TASK_CONTRACT =
+// so heterogeneous personas emit a uniform TaskDraft. Exported so stages.ts can
+// interpolate it in planRealDuo — single source, zero drift.
+export const TASK_CONTRACT =
   `Each task is JSON: {name, description, priority(P0..P3), mode(dev|non-dev), ` +
-  `depends_on: string[], source: number, label: string, acceptance: string, ` +
-  `expected_impact: string}.\n` +
+  `depends_on: (string | {label: string, type: "gate"|"order"})[], premise: string, ` +
+  `source: number, label: string, acceptance: string, expected_impact: string}.\n` +
+  `- "depends_on": each entry is a label string (order edge, back-compatible) OR an object ` +
+  `{label, type}. GATE vs ORDER — type "gate" = the upstream's RESULT decides whether this ` +
+  `task should EXIST (a go/no-go outcome, not just a prerequisite); type "order" = the ` +
+  `upstream's ARTIFACT is needed to START this task. String form = order (default). ` +
+  `Discovery/research/go-no-go/spike tasks are gates by default: a task whose existence ` +
+  `depends on a decision task's outcome MUST declare that decision as a gate edge AND state ` +
+  `the premise.\n` +
+  `- "premise": one sentence naming the assumption this task rests on; "" when unconditional. ` +
+  `Gate-dependent tasks MUST state the premise (e.g. "assumes GO on spike-auth").\n` +
   `- "expected_impact": ONE sentence — what observably improves if this ships, how it ` +
   `would be measured, why it matters (e.g. "cut listing-page payload ~40%, measured by ` +
   `build output, so mobile search stops feeling sluggish"). This is a hypothesis, not a ` +
