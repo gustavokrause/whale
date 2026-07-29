@@ -73,6 +73,10 @@ export const proposedTasks = sqliteTable(
     reeval_note: text("reeval_note"),
     // id of the gate task / rejected task that triggered re-evaluation.
     reeval_source: text("reeval_source"),
+    // Proposed revision blob (JSON: revised_name?, revised_description?,
+    // revised_acceptance?, revised_depends_on?) — written by reevaluate when
+    // verdict=revise, applied by reeval-apply, cleared by both apply and dismiss.
+    reeval_revision: text("reeval_revision"),
     // Short handle (1-3 words, e.g. "stripe", "migration") for compact tracking
     // and dependency labels in the UI.
     label: text("label"),

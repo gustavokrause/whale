@@ -204,3 +204,19 @@ export async function getTask(id: string): Promise<{ status?: string } | null> {
     return null;
   }
 }
+
+/** Completed-task result artifact from krill (deliverable body). Tolerant:
+ *  null when krill exposes no artifact field or is unreachable — the caller
+ *  falls back to an operator-pasted result on the re-eval request (an unusable
+ *  stub is worse than an explicit manual paste). */
+export async function getTaskResult(id: string): Promise<string | null> {
+  try {
+    const r = await call("GET", `/api/tasks/${id}`);
+    const t = r?.task || r || null;
+    const candidates = [t?.result, t?.artifact, t?.deliverable, t?.review_notes];
+    for (const c of candidates) if (typeof c === "string" && c.trim()) return c;
+    return null;
+  } catch {
+    return null;
+  }
+}
