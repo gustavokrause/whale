@@ -6,7 +6,7 @@ import { config, isReal } from "./config";
 import {
   getProposed, updateProposed, projectKeys, setEntryLane, listProposed, getEntry,
 } from "@/db/queries";
-import { plan, route, triage, refineProposal, flowPreview, canonicalizeProjectDeps } from "./stages";
+import { plan, route, triage, refineProposal, flowPreview, canonicalizeProjectDeps, normalizeDraftDeps } from "./stages";
 import { auditComplete } from "./runner";
 import {
   writeContext, listContextKeys, readContext, keyToSlug,
@@ -370,6 +370,10 @@ export async function refine(team: Team, id: string, input: string) {
   const tri = triage(team, { name: r.name, description: r.description, project_key: t.project_key });
   const log = JSON.parse(t.refine_log || "[]") as { input: string; at: number }[];
   log.push({ input, at: Date.now() });
+  const hasNewDeps = Array.isArray(r.depends_on);
+  const { deps: rDeps, dep_types: rDepTypes } = hasNewDeps
+    ? normalizeDraftDeps(r.depends_on)
+    : { deps: JSON.parse(t.deps || "[]") as string[], dep_types: JSON.parse(t.dep_types || "{}") as Record<string, string> };
   const updated = updateProposed(id, {
     name: r.name,
     description: r.description || "",
@@ -378,7 +382,8 @@ export async function refine(team: Team, id: string, input: string) {
     risk_tier: tri.risk_tier,
     bypass: tri.bypass,
     auto_publish: tri.auto_publish,
-    deps: JSON.stringify(Array.isArray(r.depends_on) ? r.depends_on : JSON.parse(t.deps || "[]")),
+    deps: JSON.stringify(rDeps),
+    dep_types: JSON.stringify(rDepTypes),
     rationale: tri.rationale,
     refine_log: JSON.stringify(log),
     owner_persona: r.owner_persona ?? t.owner_persona,
@@ -391,6 +396,8 @@ export async function refine(team: Team, id: string, input: string) {
     // Same rule for the impact hypothesis — a refined scope may change why the
     // task matters; keep the old hypothesis when the refiner returns none.
     expected_impact: r.expected_impact?.trim() || t.expected_impact,
+    // Never null out a stated premise — it protects downstream re-evaluation.
+    premise: r.premise?.trim() || t.premise,
     status: "proposed",
   });
   canonicalizeProjectDeps(t.project_key); // map handle-deps → task names

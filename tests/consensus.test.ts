@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import { planConsensus, planSingle, pickRefiner, type Completer, type ConsensusContext } from "../src/lib/consensus";
 import type { Team, Persona } from "../src/lib/persona-loader";
+import { normalizeDraftDeps } from "../src/lib/stages";
 import type { TaskDraft } from "../src/lib/stages";
 
 const P = (name: string, area: string): Persona => ({
@@ -230,6 +231,22 @@ test("pickRefiner: routing error falls back, never throws", async () => {
   const boom = (async () => { throw new Error("model down"); }) as unknown as Completer;
   const p = await pickRefiner(team, { name: "x", owner_persona: "Ana", input: "tweak" }, boom);
   assert.equal(p.name, "Ana", "best-effort: error → owner fallback");
+});
+
+test("normalizeDraftDeps: typed gate object persists as dep + dep_types entry", () => {
+  const { deps, dep_types } = normalizeDraftDeps([
+    { label: "go-no-go", type: "gate" },
+    "other-task",
+    { label: "order-edge", type: "order" },
+  ]);
+  assert.deepEqual(deps, ["go-no-go", "other-task", "order-edge"]);
+  assert.deepEqual(dep_types, { "go-no-go": "gate" }, "only gate edges appear in dep_types");
+});
+
+test("normalizeDraftDeps: legacy string-only depends_on yields empty dep_types (no regression)", () => {
+  const { deps, dep_types } = normalizeDraftDeps(["foo", "bar"]);
+  assert.deepEqual(deps, ["foo", "bar"]);
+  assert.deepEqual(dep_types, {}, "string-only deps produce no dep_types entries");
 });
 
 test("consensus: empty nomination falls back to the strategy+product duo", async () => {

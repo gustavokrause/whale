@@ -8,12 +8,14 @@ import { completeJSON } from "./runner";
 import { readContext, distillToContext } from "./context-store";
 import * as krill from "./krill-client";
 import { pendingRequests, markEntries, addProposed, listProposed, updateProposed, setEntriesPlanError } from "@/db/queries";
-import { planConsensus, planSingle, pickRefiner, type ConsensusContext } from "./consensus";
+import { planConsensus, planSingle, pickRefiner, TASK_CONTRACT, type ConsensusContext } from "./consensus";
 import type { Team, Persona } from "./persona-loader";
 import type { InboxEntry, ProposedTask, proposedTasks } from "@/db/schema";
 
 const persona = (team: Team, name: string): Persona | undefined =>
   team.personas.find((p) => p.name === name);
+
+export type DepEdge = string | { label: string; type?: "gate" | "order" };
 
 export type TaskDraft = {
   name: string;
@@ -22,7 +24,8 @@ export type TaskDraft = {
   new_project?: boolean;
   priority?: string;
   mode?: string;
-  depends_on?: string[];
+  depends_on?: DepEdge[];
+  premise?: string; // one sentence naming the assumption this task rests on
   source?: number; // index of the WORK REQUEST this task primarily serves
   // Altitude pass (C4): extra WORK REQUEST indexes a root-cause task
   // supersedes — those dumps are "planned by the parent", not unserved.
@@ -33,6 +36,29 @@ export type TaskDraft = {
   owner_persona?: string; // consensus: persona that proposed this task
   owner_area?: string; // consensus: that persona's area
 };
+
+/** Normalize TaskDraft.depends_on into a flat dep list + typed dep_types map.
+ *  String entry → dep, no dep_types entry (order is the default).
+ *  Object {label, type:"gate"} → dep + dep_types entry.
+ *  Object {label, type:"order"} or no type → dep only (order is implicit).
+ *  Malformed items (no label) are dropped.
+ */
+export function normalizeDraftDeps(depends_on: DepEdge[] | undefined): {
+  deps: string[];
+  dep_types: Record<string, string>;
+} {
+  const deps: string[] = [];
+  const dep_types: Record<string, string> = {};
+  for (const entry of depends_on ?? []) {
+    if (typeof entry === "string") {
+      if (entry) deps.push(entry);
+    } else if (entry && typeof entry === "object" && entry.label) {
+      deps.push(entry.label);
+      if (entry.type === "gate") dep_types[entry.label] = "gate";
+    }
+  }
+  return { deps, dep_types };
+}
 
 export type TriageResult = {
   risk_tier: string;
@@ -292,13 +318,8 @@ async function planRealDuo(
     `Augusto challenges scope and protects resources; Maria turns it into the smallest shippable tasks.\n` +
     `Turn the WORK REQUESTS into concrete proposed tasks, grounded in the PROJECT CONTEXT ` +
     `(background reference — use it to scope and clarify; do NOT restate it and do NOT invent work ` +
-    `beyond the requests). Augusto kills scope creep. ` +
-    `Attribute each task to the WORK REQUEST it primarily serves via "source" (the [n] index). ` +
-    `Give each a short "label": a 1-3 word lowercase handle to track it by (e.g. "stripe", "migration", "trial-ui"); deps reference these. ` +
-    `Give each an "acceptance": a CONCRETE, checkable definition of done that a verifier can RUN to prove the task works — name the observable end state, not the steps. ` +
-    `Prefer a runnable assertion over prose: e.g. "after a test-mode checkout, tenants.plan = the bought tier and period_end is set", "GET /api/x returns 200 with field y", "npm test passes incl. a new test for Z". For non-dev tasks, make it the deliverable's bar (e.g. "doc covers cases A, B, C with examples"). ` +
-    `Give each an "expected_impact": ONE sentence — what observably improves if this ships, how it would be measured, why it matters. A falsifiable hypothesis, not a promise; "" is honest for housekeeping with no articulable impact — never invent a metric. ` +
-    `Each task: {name, description, priority(P0..P3), mode(dev|non-dev), depends_on: string[], source: number, label: string, acceptance: string, expected_impact: string}.\n\n` +
+    `beyond the requests). Augusto kills scope creep.\n\n` +
+    `${TASK_CONTRACT}\n\n` +
     `## Every request must produce work\n` +
     `Each WORK REQUEST must yield at least one task UNLESS it is already fully covered by an ` +
     `EXISTING task with the SAME scope. "Same scope" means same change to the same target — NOT ` +
@@ -307,23 +328,7 @@ async function planRealDuo(
     `definition NOT yet covered — always propose it, and depend on the task it follows up. ` +
     `If a request truly is a duplicate, still emit the task but set depends_on to the existing ` +
     `task it overlaps so the order holds. When several requests are the same change across ` +
-    `different files, you MAY consolidate them into ONE task spanning those files.\n\n` +
-    `## Dependency DIRECTION (get this right — wrong direction breaks the build)\n` +
-    `depends_on lists the sibling tasks that must finish FIRST ([] if independent). Edges point ` +
-    `to what must already exist when the task runs. Decide direction by the task's intent:\n` +
-    `- ADD/CREATE a shared thing (util, type, column, API, export, flag): the producer runs ` +
-    `FIRST; consumers depend on it.\n` +
-    `- REMOVE/DELETE a shared thing (drop an export/symbol/column/endpoint that others use): the ` +
-    `removal runs LAST — it depends on EVERY task that stops using that thing. Deleting the ` +
-    `definition before its consumers are updated breaks every consumer (e.g. removing an export ` +
-    `from features.ts while pages still import it). The teardown task is a SINK, not a root.\n` +
-    `- MODIFY a shared contract (rename, signature change): sequence producer→consumers, or change ` +
-    `them together if there is no compatibility shim.\n` +
-    `Deps MAY cross requests and MAY reference EXISTING tasks (including in-flight ones).\n` +
-    `ALTITUDE (symptom vs cause): if several WORK REQUESTS are symptoms of ONE underlying cause, ` +
-    `propose ONE root-cause task fixing the class — "source" = the primary request, ` +
-    `"sources":[every other [n] it supersedes]. Skip the per-symptom patches unless one is ` +
-    `independently urgent (then depends_on the cause task).`;
+    `different files, you MAY consolidate them into ONE task spanning those files.`;
 
   const backlog = existing.length
     ? `\n\nEXISTING TASKS for this project (already in the backlog — don't re-propose the SAME scope; you MAY set depends_on to these EXACT names). Each shows its live state — [in-flight] tasks are still running, so a follow-up that extends one should DEPEND on it, not replace it:\n${existing
@@ -408,6 +413,7 @@ function triageAndStore(
       `${tri.rationale}; recurring class "${t.label}" (${priorOfClass} prior proposals) — ` +
       `routed to human as cause-fix candidate`;
   }
+  const { deps, dep_types } = normalizeDraftDeps(t.depends_on);
   // Map the planner's source index to the dump; fall back to the first dump.
   const srcEntry =
     typeof t.source === "number" && reqs[t.source] ? reqs[t.source] : reqs[0];
@@ -424,7 +430,9 @@ function triageAndStore(
     rationale: tri.rationale,
     bypass: tri.bypass,
     auto_publish: tri.auto_publish,
-    deps: Array.isArray(t.depends_on) ? t.depends_on : [],
+    deps,
+    dep_types: Object.keys(dep_types).length ? dep_types : undefined,
+    premise: t.premise?.trim() || null,
     acceptance: t.acceptance?.trim() || null,
     expected_impact: t.expected_impact?.trim() || null,
     owner_persona: t.owner_persona?.trim() || null,
@@ -583,14 +591,17 @@ export async function refineProposal(team: Team, current: ProposedTask, input: s
     `(${refiner?.area || "Product"}). Refine ONE proposed task per the user's input, ` +
     `applying YOUR discipline's judgment. Keep what's good, apply the change, don't ` +
     `invent extra scope. Return ` +
-    `{name, description, priority(P0..P3), mode(dev|non-dev), depends_on:string[], acceptance}. ` +
+    `{name, description, priority(P0..P3), mode(dev|non-dev), ` +
+    `depends_on:(string|{label:string,type:"gate"|"order"})[], premise:string, acceptance}. ` +
     `acceptance is the checkable definition-of-done VERIFYING runs against. If your ` +
     `refine changes the scope or the deliverable, UPDATE acceptance to match it — a ` +
     `concrete, runnable assertion. If scope is unchanged, return the existing ` +
     `acceptance verbatim. NEVER leave a stale acceptance that contradicts the ` +
-    `description (it would verify the wrong thing).`;
+    `description (it would verify the wrong thing). ` +
+    `If the current task has a premise, return it VERBATIM unless your refine invalidates it — ` +
+    `NEVER null out a stated premise (it protects downstream re-evaluation logic).`;
   const user =
-    `CURRENT TASK:\n${JSON.stringify({ name: current.name, description: current.description, priority: current.priority, mode: current.mode, depends_on: JSON.parse(current.deps || "[]"), acceptance: current.acceptance })}\n\n` +
+    `CURRENT TASK:\n${JSON.stringify({ name: current.name, description: current.description, priority: current.priority, mode: current.mode, depends_on: JSON.parse(current.deps || "[]"), dep_types: JSON.parse(current.dep_types || "{}"), premise: current.premise, acceptance: current.acceptance })}\n\n` +
     `USER INPUT:\n${input}${backlog}\n\nReturn the updated task JSON.${fileNote}`;
   const out = await completeJSON<TaskDraft>({ system, user, model: config.models.plan, cwd, fileAccess: !!cwd, purpose: "refine" });
   // Re-stamp ownership: a refine can move a task to whoever now owns it.
