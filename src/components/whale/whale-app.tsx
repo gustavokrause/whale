@@ -770,6 +770,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   // Cards are collapsed by default (scannable list); expand one for full detail.
   const [expandedCards, toggleCard] = usePersistedSet("whale-proposed-cards-expanded");
   const [collapsedProjects, toggleProject] = usePersistedSet("whale-proposed-projects-collapsed");
+  const [collapsedWaves, toggleWave] = usePersistedSet("whale-proposed-waves-collapsed");
   const { push } = useToast();
   const dlg = useDialog();
 
@@ -893,6 +894,41 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
     for (const t of list) visit(t);
     return out;
   };
+  // Group a dump's tasks into topological waves (Kahn). Edges restricted to deps
+  // present in `list` so cross-dump deps don't distort local wave numbers.
+  // Leftovers after Kahn drains → single trailing cycle wave.
+  const computeWaves = (list: EnrichedTask[]) => {
+    const byName = new Map(list.map((t) => [t.name, t]));
+    const indegree = new Map(list.map((t) => [t.name, 0]));
+    const fwd = new Map(list.map((t) => [t.name, [] as string[]]));
+    for (const t of list) {
+      for (const d of JSON.parse(t.deps || "[]") as string[]) {
+        if (!byName.has(d)) continue;
+        fwd.get(d)!.push(t.name);
+        indegree.set(t.name, (indegree.get(t.name) ?? 0) + 1);
+      }
+    }
+    const waves: { idx: number; tasks: EnrichedTask[]; cycle?: boolean }[] = [];
+    let queue = list.filter((t) => indegree.get(t.name) === 0);
+    const processed = new Set<string>();
+    let waveIdx = 0;
+    while (queue.length > 0) {
+      waves.push({ idx: waveIdx++, tasks: queue });
+      const next: EnrichedTask[] = [];
+      for (const t of queue) {
+        processed.add(t.name);
+        for (const dep of fwd.get(t.name) ?? []) {
+          const nd = (indegree.get(dep) ?? 0) - 1;
+          indegree.set(dep, nd);
+          if (nd === 0) { const dt = byName.get(dep); if (dt) next.push(dt); }
+        }
+      }
+      queue = next;
+    }
+    const cycled = list.filter((t) => !processed.has(t.name));
+    if (cycled.length > 0) waves.push({ idx: waveIdx, tasks: cycled, cycle: true });
+    return waves;
+  };
   // Sub-group a project's tasks by source dump (plan run), each in execution order.
   const dumpGroups = (list: EnrichedTask[]) => {
     const m = new Map<string, EnrichedTask[]>();
@@ -933,6 +969,20 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   for (const t of items)
     for (const d of JSON.parse(t.deps || "[]") as string[])
       dependents.set(d, [...(dependents.get(d) ?? []), t.name]);
+  // Transitive closure of `dependents`: task name → all names that transitively depend on it.
+  const transitiveDependents = new Map<string, Set<string>>();
+  for (const t of items) {
+    const visited = new Set<string>();
+    const dfs = (name: string) => {
+      for (const dep of dependents.get(name) ?? []) {
+        if (visited.has(dep)) continue;
+        visited.add(dep);
+        dfs(dep);
+      }
+    };
+    dfs(t.name);
+    transitiveDependents.set(t.name, visited);
+  }
   // Actionable = not parked and not yet pushed (can still go to krill).
   const actionable = (p: EnrichedTask) =>
     !p.disabled && ["proposed", "approved", "push_failed"].includes(p.status);
@@ -1034,137 +1084,189 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                     </div>
                   )}
                 </div>
-                {!collapsedGroups.has(g.id) && (
-
-
-                  <ul className="flex-1 divide-y divide-border">
-                    {g.tasks.map((p) => {
-                      const open = expandedCards.has(p.id);
-                      const deps = JSON.parse(p.deps || "[]") as string[];
-                      const blocking = blockingDeps(p);
-                      const depsCleared = readyForKrill(p);
-                      const blockedByDeps = actionable(p) && blocking.length > 0;
-                      const depBlockTitle = blockedByDeps ? `Blocked — waiting on: ${blocking.join(", ")}` : undefined;
-                      const blocks = dependents.get(p.name) ?? [];
-                      const crossDep = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
-                      const refines = JSON.parse(p.refine_log || "[]").length;
-                      return (
-                        <li key={p.id} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : "bg-surface"}`}>
-                          {/* collapsed header — one scannable row: ref · label · name · risk · status · primary action */}
-                          <div className="flex items-center gap-2 px-3 py-2 pl-7 hover:bg-surface-2/40 transition-colors">
-                            <button
-                              type="button"
-                              onClick={() => toggleCard(p.id)}
-                              className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer hover:text-text"
-                              title={open ? "Collapse" : "Expand"}
-                            >
-                              <span className="shrink-0 text-text-3 inline-flex">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</span>
-                              <span
-                                className={`shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
-                                title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
-                              >
-                                {p.krill_task_id ?? `TEMP-${p.id.slice(0, 4).toUpperCase()}`}
-                              </span>
-                              {p.label ? (
-                                <span className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary">{p.label}</span>
-                              ) : null}
-                              {p.owner_persona ? (
-                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-info/10 text-info" title={`proposed by ${p.owner_persona}${p.owner_area ? ` (${p.owner_area})` : ""}`}>{p.owner_persona}</span>
-                              ) : null}
-                              <span className="text-sm font-medium break-words">{p.name}</span>
-                            </button>
-                            <HashId id={p.id} />
-                            <span className="shrink-0 inline-flex items-center gap-1 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
-                              {riskDot(p.risk_tier)} {p.risk_tier || "?"}
-                            </span>
-                            {p.status === "pushed" && p.krill_status ? (
-                              <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full ${p.krill_status === "DONE" ? "bg-success/20 text-success" : p.krill_status === "CANCELED" ? "bg-muted/20 text-muted" : "bg-info/20 text-info"}`}>
-                                {p.krill_status}
-                              </span>
-                            ) : (
-                              <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-border text-text-2">{p.status}</span>
-                            )}
-                            {p.disabled && <span className="shrink-0 inline-flex items-center text-[11px] px-1.5 py-0.5 rounded-full bg-muted/20 text-muted" title="parked"><Pause className="h-3 w-3" /></span>}
-                            {depsCleared && (
-                              <span className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title={deps.length === 0 ? "No dependencies — ready to push to krill" : `All ${deps.length} ${deps.length === 1 ? "dependency is" : "dependencies are"} DONE — ready to push to krill`}>
-                                <CheckCircle2 className="h-3 w-3" /> ready
-                              </span>
-                            )}
-                            {blockedByDeps && (
-                              <span className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning" title={`Waiting on: ${blocking.join(", ")}`}>
-                                <Ban className="h-3 w-3" /> blocked {blocking.length}
-                              </span>
-                            )}
-                            {/* primary action, inline */}
-                            {p.disabled ? (
-                              <button className={pushBtn} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again"><Play className="h-3.5 w-3.5" /></button>
-                            ) : p.status === "proposed" ? (
-                              <button className={`${pushBtn} ${blockedByDeps ? dis : ""}`} disabled={blockedByDeps} title={depBlockTitle} onClick={() => act(p.id, "approve")}>Approve</button>
-                            ) : p.status === "approved" ? (
-                              <button className={`${pushBtn} ${dis}`} disabled={krillDown || blockedByDeps} title={krillDown ? "krill is down — can't push" : depBlockTitle} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push</button>
-                            ) : p.status === "push_failed" ? (
-                              <button className={`${pushBtn} ${dis}`} disabled={krillDown || blockedByDeps} title={krillDown ? "krill is down — can't push" : depBlockTitle} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
-                            ) : null}
-                          </div>
-                          {/* impact hypothesis — one muted line; blank = housekeeping, show nothing */}
-                          {p.expected_impact?.trim() ? (
-                            <div className="px-3 pb-2 pl-12 text-xs text-info truncate" title={p.expected_impact}>
-                              ◆ {p.expected_impact}
-                            </div>
-                          ) : null}
-                          {/* expanded detail — description, meta, rationale, secondary actions */}
-                          {open && (
-                            <div className="p-4 pt-1 pl-8 space-y-4">
-                              {p.description && <p className="border border-dashed rounded-md p-3 text-xs text-text-2">{p.description}</p>}
-                              <div className="text-xs text-text-2 flex gap-2 flex-wrap items-center">
-                                <span className="px-2 rounded-full bg-border">{p.priority}</span>
-                                <span className="px-2 rounded-full bg-border">{p.mode}</span>
-                                <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
-                                <span className="inline-flex items-center gap-1 px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
-                                {deps.length > 0 && (
-                                  <span className={`px-2 rounded-full ${crossDep ? "bg-info/15 text-info" : "bg-border"}`} title={`runs after: ${deps.join(", ")}`}>
-                                    ← depends on: {renderRefs(deps)}{crossDep ? " · x-dump" : ""}
+                {!collapsedGroups.has(g.id) && computeWaves(g.tasks).map((wave) => {
+                  const waveKey = `${g.id}::w${wave.idx}`;
+                  const waveCollapsed = collapsedWaves.has(waveKey);
+                  const waveNames = new Set(wave.tasks.map((t) => t.name));
+                  const unblocks = wave.cycle
+                    ? 0
+                    : new Set(
+                        wave.tasks
+                          .flatMap((t) => [...(transitiveDependents.get(t.name) ?? [])])
+                          .filter((n) => !waveNames.has(n))
+                      ).size;
+                  return (
+                    <div key={waveKey}>
+                      <div className="flex items-center gap-2 px-3 py-1 pl-7 bg-surface-2/80 border-b border-border">
+                        <button
+                          type="button"
+                          onClick={() => toggleWave(waveKey)}
+                          className="flex items-center gap-1 text-xs text-text-3 hover:text-text"
+                        >
+                          <span className="shrink-0 inline-flex">{waveCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}</span>
+                          {wave.cycle
+                            ? `Cycle — ${wave.tasks.length} task${wave.tasks.length === 1 ? "" : "s"} (check deps)`
+                            : `Wave ${wave.idx} — ${wave.tasks.length} task${wave.tasks.length === 1 ? "" : "s"}, unblocks ${unblocks}`
+                          }
+                        </button>
+                      </div>
+                      {!waveCollapsed && (
+                        <ul className="flex-1 divide-y divide-border">
+                          {wave.tasks.map((p) => {
+                            const open = expandedCards.has(p.id);
+                            const deps = JSON.parse(p.deps || "[]") as string[];
+                            const depTypes = JSON.parse(p.dep_types || "{}") as Record<string, "order" | "gate">;
+                            const gateDeps = deps.filter((d) => (depTypes[d] ?? "order") === "gate");
+                            const blocking = blockingDeps(p);
+                            const depsCleared = readyForKrill(p);
+                            const blockedByDeps = actionable(p) && blocking.length > 0;
+                            const depBlockTitle = blockedByDeps ? `Blocked — waiting on: ${blocking.join(", ")}` : undefined;
+                            const blocks = dependents.get(p.name) ?? [];
+                            const crossDep = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
+                            const refines = JSON.parse(p.refine_log || "[]").length;
+                            const isGateFor = blocks.some((down) => {
+                              const downTask = nameToTask.get(down);
+                              if (!downTask) return false;
+                              const dt = JSON.parse(downTask.dep_types || "{}") as Record<string, "order" | "gate">;
+                              return dt[p.name] === "gate";
+                            });
+                            const transitiveCount = transitiveDependents.get(p.name)?.size ?? 0;
+                            return (
+                              <li key={p.id} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : "bg-surface"}`}>
+                                {/* collapsed header — one scannable row: ref · label · name · risk · status · primary action */}
+                                <div className="flex items-center gap-2 px-3 py-2 pl-7 hover:bg-surface-2/40 transition-colors">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleCard(p.id)}
+                                    className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer hover:text-text"
+                                    title={open ? "Collapse" : "Expand"}
+                                  >
+                                    <span className="shrink-0 text-text-3 inline-flex">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</span>
+                                    <span
+                                      className={`shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded ${p.krill_task_id ? "bg-info/15 text-info" : "bg-border text-text-2"}`}
+                                      title={p.krill_task_id ? `krill task ${p.krill_task_id}` : `temp ref (until pushed to krill) · ${p.id}`}
+                                    >
+                                      {p.krill_task_id ?? `TEMP-${p.id.slice(0, 4).toUpperCase()}`}
+                                    </span>
+                                    {p.label ? (
+                                      <span className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary">{p.label}</span>
+                                    ) : null}
+                                    {p.owner_persona ? (
+                                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-info/10 text-info" title={`proposed by ${p.owner_persona}${p.owner_area ? ` (${p.owner_area})` : ""}`}>{p.owner_persona}</span>
+                                    ) : null}
+                                    <span className="text-sm font-medium break-words">{p.name}</span>
+                                  </button>
+                                  <HashId id={p.id} />
+                                  <span className="shrink-0 inline-flex items-center gap-1 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
+                                    {riskDot(p.risk_tier)} {p.risk_tier || "?"}
                                   </span>
-                                )}
-                                {blocks.length > 0 && (
-                                  <span className="px-2 rounded-full bg-border text-text-3" title={`unblocks: ${blocks.join(", ")}`}>
-                                    → unblocks: {renderRefs(blocks)}
-                                  </span>
-                                )}
-                              </div>
-                              {(p.rationale || p.push_error || refines > 0) && (
-                                <div className="text-xs text-text-2">
-                                  {p.rationale}
-                                  {p.push_error && <span className="inline-flex items-center gap-1">{" · "}<AlertTriangle className="h-3 w-3 text-danger" /> {p.push_error}</span>}
-                                  {refines > 0 && (
-                                    <span className="inline-flex items-center gap-0.5">{" · "}<Pencil className="h-3 w-3" /> refined {refines}×</span>
+                                  {p.status === "pushed" && p.krill_status ? (
+                                    <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full ${p.krill_status === "DONE" ? "bg-success/20 text-success" : p.krill_status === "CANCELED" ? "bg-muted/20 text-muted" : "bg-info/20 text-info"}`}>
+                                      {p.krill_status}
+                                    </span>
+                                  ) : (
+                                    <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-border text-text-2">{p.status}</span>
                                   )}
+                                  {p.disabled && <span className="shrink-0 inline-flex items-center text-[11px] px-1.5 py-0.5 rounded-full bg-muted/20 text-muted" title="parked"><Pause className="h-3 w-3" /></span>}
+                                  {gateDeps.length > 0 && (
+                                    <span
+                                      className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning"
+                                      title={p.premise ?? `Gate: ${gateDeps.join(", ")}`}
+                                    >
+                                      <Lock className="h-3 w-3" /> gated by {renderRefs(gateDeps)}
+                                    </span>
+                                  )}
+                                  {isGateFor && transitiveCount > 0 && (
+                                    <span
+                                      className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-danger/20 text-danger font-medium"
+                                      title={[...(transitiveDependents.get(p.name) ?? [])].join(", ")}
+                                    >
+                                      <Lock className="h-3 w-3" /> blocks {transitiveCount}
+                                    </span>
+                                  )}
+                                  {depsCleared && (
+                                    <span className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-success/20 text-success font-medium" title={deps.length === 0 ? "No dependencies — ready to push to krill" : `All ${deps.length} ${deps.length === 1 ? "dependency is" : "dependencies are"} DONE — ready to push to krill`}>
+                                      <CheckCircle2 className="h-3 w-3" /> ready
+                                    </span>
+                                  )}
+                                  {blockedByDeps && (
+                                    <span className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-warning/20 text-warning" title={`Waiting on: ${blocking.join(", ")}`}>
+                                      <Ban className="h-3 w-3" /> blocked {blocking.length}
+                                    </span>
+                                  )}
+                                  {/* primary action, inline */}
+                                  {p.disabled ? (
+                                    <button className={pushBtn} onClick={() => togglePark(p.id, false)} title="Unpark — make it actionable again"><Play className="h-3.5 w-3.5" /></button>
+                                  ) : p.status === "proposed" ? (
+                                    <button className={`${pushBtn} ${blockedByDeps ? dis : ""}`} disabled={blockedByDeps} title={depBlockTitle} onClick={() => act(p.id, "approve")}>Approve</button>
+                                  ) : p.status === "approved" ? (
+                                    <button className={`${pushBtn} ${dis}`} disabled={krillDown || blockedByDeps} title={krillDown ? "krill is down — can't push" : depBlockTitle} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Push</button>
+                                  ) : p.status === "push_failed" ? (
+                                    <button className={`${pushBtn} ${dis}`} disabled={krillDown || blockedByDeps} title={krillDown ? "krill is down — can't push" : depBlockTitle} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
+                                  ) : null}
                                 </div>
-                              )}
-                              <ConsensusTrail log={p.consensus_log} />
-                              <div className="flex gap-2 flex-wrap">
-                                {!p.disabled && p.status === "proposed" && (
-                                  <button className={dangerSm} onClick={() => act(p.id, "reject")}>Reject</button>
+                                {/* impact hypothesis — one muted line; blank = housekeeping, show nothing */}
+                                {p.expected_impact?.trim() ? (
+                                  <div className="px-3 pb-2 pl-12 text-xs text-info truncate" title={p.expected_impact}>
+                                    ◆ {p.expected_impact}
+                                  </div>
+                                ) : null}
+                                {/* expanded detail — description, meta, rationale, secondary actions */}
+                                {open && (
+                                  <div className="p-4 pt-1 pl-8 space-y-4">
+                                    {p.description && <p className="border border-dashed rounded-md p-3 text-xs text-text-2">{p.description}</p>}
+                                    {p.premise && <p className="text-xs italic text-text-2">Assumes: {p.premise}</p>}
+                                    <div className="text-xs text-text-2 flex gap-2 flex-wrap items-center">
+                                      <span className="px-2 rounded-full bg-border">{p.priority}</span>
+                                      <span className="px-2 rounded-full bg-border">{p.mode}</span>
+                                      <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
+                                      <span className="inline-flex items-center gap-1 px-2 rounded-full bg-info/15 text-info">flow: {flowOf(p)}</span>
+                                      {deps.length > 0 && (
+                                        <span className={`px-2 rounded-full ${crossDep ? "bg-info/15 text-info" : "bg-border"}`} title={`runs after: ${deps.join(", ")}`}>
+                                          ← depends on: {renderRefs(deps)}{crossDep ? " · x-dump" : ""}
+                                        </span>
+                                      )}
+                                      {blocks.length > 0 && (
+                                        <span className="px-2 rounded-full bg-border text-text-3" title={`unblocks: ${blocks.join(", ")}`}>
+                                          → unblocks: {renderRefs(blocks)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {(p.rationale || p.push_error || refines > 0) && (
+                                      <div className="text-xs text-text-2">
+                                        {p.rationale}
+                                        {p.push_error && <span className="inline-flex items-center gap-1">{" · "}<AlertTriangle className="h-3 w-3 text-danger" /> {p.push_error}</span>}
+                                        {refines > 0 && (
+                                          <span className="inline-flex items-center gap-0.5">{" · "}<Pencil className="h-3 w-3" /> refined {refines}×</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    <ConsensusTrail log={p.consensus_log} />
+                                    <div className="flex gap-2 flex-wrap">
+                                      {!p.disabled && p.status === "proposed" && (
+                                        <button className={dangerSm} onClick={() => act(p.id, "reject")}>Reject</button>
+                                      )}
+                                      {!p.disabled && p.status !== "pushed" && p.status !== "rejected" && (
+                                        <>
+                                          <button className={subtleBtn} onClick={() => refine(p.id)}>Input</button>
+                                          <button className={subtleBtn} onClick={() => reassign(p.id)}>Reassign</button>
+                                          <button className={subtleBtn} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes"><Pause className="h-3 w-3" /> Park</button>
+                                        </>
+                                      )}
+                                      <button className={dangerSm} onClick={() => del(p.id)}>
+                                        <Trash2 className="h-3.5 w-3.5" /> delete
+                                      </button>
+                                    </div>
+                                  </div>
                                 )}
-                                {!p.disabled && p.status !== "pushed" && p.status !== "rejected" && (
-                                  <>
-                                    <button className={subtleBtn} onClick={() => refine(p.id)}>Input</button>
-                                    <button className={subtleBtn} onClick={() => reassign(p.id)}>Reassign</button>
-                                    <button className={subtleBtn} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes"><Pause className="h-3 w-3" /> Park</button>
-                                  </>
-                                )}
-                                <button className={dangerSm} onClick={() => del(p.id)}>
-                                  <Trash2 className="h-3.5 w-3.5" /> delete
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-
-                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
