@@ -45,10 +45,10 @@ export type TaskDraft = {
  */
 export function normalizeDraftDeps(depends_on: DepEdge[] | undefined): {
   deps: string[];
-  dep_types: Record<string, string>;
+  dep_types: Record<string, "order" | "gate">;
 } {
   const deps: string[] = [];
-  const dep_types: Record<string, string> = {};
+  const dep_types: Record<string, "order" | "gate"> = {};
   for (const entry of depends_on ?? []) {
     if (typeof entry === "string") {
       if (entry) deps.push(entry);
@@ -606,6 +606,106 @@ export async function refineProposal(team: Team, current: ProposedTask, input: s
   const out = await completeJSON<TaskDraft>({ system, user, model: config.models.plan, cwd, fileAccess: !!cwd, purpose: "refine" });
   // Re-stamp ownership: a refine can move a task to whoever now owns it.
   return { ...out, owner_persona: refiner?.name, owner_area: refiner?.area };
+}
+
+/* ---------- REEVALUATE: gate result → per-dependent verdict (WH-19) ---------- */
+
+export type ReevalVerdictKind = "keep" | "revise" | "park" | "kill";
+
+export type ReevalVerdict = {
+  target_id: string;
+  verdict: ReevalVerdictKind;
+  note: string;
+  revised_name?: string;
+  revised_description?: string;
+  revised_acceptance?: string;
+  revised_depends_on?: DepEdge[];
+};
+
+export type ReevalInput = {
+  gate: ProposedTask;
+  result: string;
+  context: string;
+  dependents: ProposedTask[];
+  projectRejected: string[];
+};
+
+export async function reevaluate(team: Team, input: ReevalInput): Promise<ReevalVerdict[]> {
+  return isReal() ? reevaluateReal(team, input) : reevaluateStub(input);
+}
+
+function reevaluateStub(input: ReevalInput): ReevalVerdict[] {
+  const { gate, result, dependents, projectRejected } = input;
+  return dependents.map((d) => {
+    const deps = JSON.parse(d.deps || "[]") as string[];
+    const depTypes = JSON.parse(d.dep_types || "{}") as Record<string, string>;
+    const rejectedDeps = deps.filter((dep) => projectRejected.includes(dep));
+    if (rejectedDeps.length > 0) {
+      const nonRejected = deps.filter((dep) => !projectRejected.includes(dep));
+      const revised_depends_on: DepEdge[] = nonRejected.map((dep) =>
+        depTypes[dep] === "gate" ? { label: dep, type: "gate" as const } : dep,
+      );
+      return {
+        target_id: d.id,
+        verdict: "revise" as const,
+        note: `dep pointed at rejected task(s): ${rejectedDeps.join(", ")}`,
+        revised_depends_on,
+      };
+    }
+    if (d.premise && result.includes(`CONTRADICTED: ${d.premise}`)) {
+      return {
+        target_id: d.id,
+        verdict: "kill" as const,
+        note: `premise contradicted by gate result: ${d.premise}`,
+      };
+    }
+    return {
+      target_id: d.id,
+      verdict: "keep" as const,
+      note: `premise holds against gate "${gate.name}" result`,
+    };
+  });
+}
+
+async function reevaluateReal(team: Team, input: ReevalInput): Promise<ReevalVerdict[]> {
+  const { gate, result, context, dependents, projectRejected } = input;
+  const author = persona(team, "Fernanda") || persona(team, "Caio");
+  const system =
+    `${author?.systemPrompt || ""}\n\n` +
+    `You are re-evaluating proposed tasks after a gate task finished.\n\n` +
+    `RULES:\n` +
+    `1. A premise contradicted by the gate result → verdict MUST be "kill" or "revise", NEVER "keep".\n` +
+    `2. A task whose deps include any REJECTED task MUST be "revise" with revised_depends_on rewritten to remove or replace those deps.\n` +
+    `3. Every verdict entry MUST have a non-empty "note" explaining the reasoning.\n` +
+    `4. "revised_*" fields only present when verdict="revise".\n` +
+    `5. Return exactly one entry per dependent, keyed by target_id.`;
+  const user =
+    `GATE TASK: ${JSON.stringify({ name: gate.name, description: gate.description, acceptance: gate.acceptance })}\n\n` +
+    `GATE RESULT:\n${result}\n\n` +
+    `PROJECT CONTEXT:\n${context || "(none)"}\n\n` +
+    `REJECTED TASKS (deps pointing at these MUST be rewritten):\n${projectRejected.length ? projectRejected.join(", ") : "(none)"}\n\n` +
+    `DEPENDENTS TO RE-EVALUATE:\n` +
+    dependents
+      .map((d) =>
+        JSON.stringify({
+          target_id: d.id,
+          name: d.name,
+          description: d.description,
+          acceptance: d.acceptance,
+          premise: d.premise,
+          deps: JSON.parse(d.deps || "[]"),
+          dep_types: JSON.parse(d.dep_types || "{}"),
+        }),
+      )
+      .join("\n") +
+    `\n\nReturn a JSON array of {target_id, verdict("keep"|"revise"|"park"|"kill"), note, revised_name?, revised_description?, revised_acceptance?, revised_depends_on?}.`;
+  const out = await completeJSON<ReevalVerdict[] | { verdicts: ReevalVerdict[] }>({
+    system,
+    user,
+    model: config.models.plan,
+    purpose: "reevaluate",
+  });
+  return Array.isArray(out) ? out : out.verdicts || [];
 }
 
 /** Human-readable preview of where a task will stop in krill, from its flags. */
