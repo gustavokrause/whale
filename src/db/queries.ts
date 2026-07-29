@@ -118,6 +118,11 @@ type ProposedInput = {
   bypass?: boolean;
   auto_publish?: boolean;
   deps?: string[];
+  dep_types?: Record<string, "order" | "gate">;
+  premise?: string | null;
+  reeval_status?: "pending" | "keep" | "revise" | "park" | "kill" | null;
+  reeval_note?: string | null;
+  reeval_source?: string | null;
   plan_run_id?: string | null;
   source_entry_id?: string | null;
   label?: string | null;
@@ -143,6 +148,11 @@ export function addProposed(t: ProposedInput): ProposedTask {
       bypass: !!t.bypass,
       auto_publish: !!t.auto_publish,
       deps: JSON.stringify(Array.isArray(t.deps) ? t.deps : []),
+      dep_types: JSON.stringify(t.dep_types && typeof t.dep_types === "object" ? t.dep_types : {}),
+      premise: t.premise ?? null,
+      reeval_status: t.reeval_status ?? null,
+      reeval_note: t.reeval_note ?? null,
+      reeval_source: t.reeval_source ?? null,
       label: t.label ?? null,
       acceptance: t.acceptance ?? null,
     expected_impact: t.expected_impact ?? null,

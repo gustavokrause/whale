@@ -10,7 +10,7 @@ import * as krill from "./krill-client";
 import { pendingRequests, markEntries, addProposed, listProposed, updateProposed, setEntriesPlanError } from "@/db/queries";
 import { planConsensus, planSingle, pickRefiner, type ConsensusContext } from "./consensus";
 import type { Team, Persona } from "./persona-loader";
-import type { InboxEntry, ProposedTask } from "@/db/schema";
+import type { InboxEntry, ProposedTask, proposedTasks } from "@/db/schema";
 
 const persona = (team: Team, name: string): Persona | undefined =>
   team.personas.find((p) => p.name === name);
@@ -181,7 +181,22 @@ export function canonicalizeProjectDeps(projectKey: string): void {
   for (const t of all) {
     const deps = JSON.parse(t.deps || "[]") as string[];
     const norm = [...new Set(deps.map((d) => toName.get(d)).filter((n): n is string => !!n && n !== t.name))];
-    if (JSON.stringify(norm) !== t.deps) updateProposed(t.id, { deps: JSON.stringify(norm) });
+
+    const rawTypes = JSON.parse(t.dep_types || "{}") as Record<string, string>;
+    const normTypes: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rawTypes)) {
+      const canon = toName.get(k);
+      if (!canon || canon === t.name) continue;
+      if (v !== "order" && v !== "gate") continue;
+      normTypes[canon] = v;
+    }
+
+    const nextDeps = JSON.stringify(norm);
+    const nextTypes = JSON.stringify(normTypes);
+    const patch: Partial<typeof proposedTasks.$inferInsert> = {};
+    if (nextDeps !== t.deps) patch.deps = nextDeps;
+    if (nextTypes !== (t.dep_types || "{}")) patch.dep_types = nextTypes;
+    if (Object.keys(patch).length) updateProposed(t.id, patch);
   }
 }
 
