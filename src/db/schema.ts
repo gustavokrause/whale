@@ -59,6 +59,20 @@ export const proposedTasks = sqliteTable(
     // skips); true/false = explicit override.
     skip_verify: integer("skip_verify", { mode: "boolean" }),
     deps: text("deps").notNull().default("[]"), // JSON: sibling task names (B2)
+    // JSON map depName -> "order" | "gate". Missing key = "order" (every legacy
+    // edge reads as ordering without backfill). "gate" edges are premise edges:
+    // the downstream only exists if the upstream returns a GO.
+    dep_types: text("dep_types").notNull().default("{}"),
+    // The assumption the proposal rests on (e.g. "assumes GO on caderno wedge").
+    // NULL = unconditional.
+    premise: text("premise"),
+    // Proposed re-evaluation verdict after an upstream gate result. NEVER
+    // auto-applied — a human confirms. NULL = not yet re-evaluated.
+    reeval_status: text("reeval_status"),
+    // Why the verdict + which gate result triggered it.
+    reeval_note: text("reeval_note"),
+    // id of the gate task / rejected task that triggered re-evaluation.
+    reeval_source: text("reeval_source"),
     // Short handle (1-3 words, e.g. "stripe", "migration") for compact tracking
     // and dependency labels in the UI.
     label: text("label"),

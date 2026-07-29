@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 
 import { config, isReal, setConfigOverrides } from "../src/lib/config";
 import { loadTeam } from "../src/lib/persona-loader";
-import { db } from "../src/db/client";
+import { db, sql as sqlite } from "../src/db/client";
 import { inboxEntries, proposedTasks, config as configTable } from "../src/db/schema";
 import {
   addEntry, listEntries, rawEntries, markEntries,
@@ -15,7 +15,7 @@ import {
   addBlocker, listBlockers, resolveBlocker,
 } from "../src/db/queries";
 import { blockers } from "../src/db/schema";
-import { triage, flowPreview, plan } from "../src/lib/stages";
+import { triage, flowPreview, plan, canonicalizeProjectDeps } from "../src/lib/stages";
 import { push, pushBatch, refine } from "../src/lib/pipeline";
 import { classifyBlock } from "../src/lib/runner";
 
@@ -440,4 +440,45 @@ test("push: skip_verify=false (force on) is sent explicitly so krill verifies ev
   } finally {
     k.restore();
   }
+});
+
+test("proposed_tasks: typed dep edges + premise/reeval columns round-trip", () => {
+  resetDb();
+  // (1) schema — migration added the columns
+  const cols = (sqlite.prepare("PRAGMA table_info(proposed_tasks)").all() as { name: string }[]).map((r) => r.name);
+  for (const c of ["dep_types", "premise", "reeval_status", "reeval_note", "reeval_source"]) {
+    assert.ok(cols.includes(c), `proposed_tasks missing column ${c}`);
+  }
+
+  // (2) round-trip typed deps + premise through addProposed/getProposed
+  const gate = addProposed({ project_key: "wh", name: "MV-17 memo", label: "memo" });
+  const child = addProposed({
+    project_key: "wh",
+    name: "MV-18 build",
+    label: "build",
+    deps: ["MV-17 memo"],
+    dep_types: { "MV-17 memo": "gate" },
+    premise: "assumes GO on MV-17 memo",
+    reeval_status: "pending",
+    reeval_note: "awaiting memo verdict",
+    reeval_source: gate.id,
+  });
+  const read = getProposed(child.id)!;
+  assert.deepEqual(JSON.parse(read.dep_types), { "MV-17 memo": "gate" });
+  assert.equal(read.premise, "assumes GO on MV-17 memo");
+  assert.equal(read.reeval_status, "pending");
+  assert.equal(read.reeval_source, gate.id);
+
+  // (3) canonicalizeProjectDeps rewrites label-keyed dep_types to canonical name
+  const child2 = addProposed({
+    project_key: "wh",
+    name: "MV-19 ship",
+    deps: ["memo"],
+    dep_types: { "memo": "gate" },
+  });
+  canonicalizeProjectDeps("wh");
+  const canon = getProposed(child2.id)!;
+  assert.deepEqual(JSON.parse(canon.deps), ["MV-17 memo"], "deps canonicalized");
+  assert.deepEqual(JSON.parse(canon.dep_types), { "MV-17 memo": "gate" }, "dep_types keys canonicalized in lockstep");
+  resetDb();
 });
