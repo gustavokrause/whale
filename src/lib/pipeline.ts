@@ -23,6 +23,12 @@ const expandHome = (p: string) => (p?.startsWith("~") ? p.replace(/^~/, homedir(
 const isProtected = (key?: string | null) =>
   config.autonomy.protected.includes((key || "").toLowerCase());
 
+const gateDeps = (t: ProposedTask): string[] => {
+  const types = JSON.parse(t.dep_types || "{}") as Record<string, string>;
+  return Object.entries(types).filter(([, k]) => k === "gate").map(([n]) => n);
+};
+const isReevalPending = (t: ProposedTask) => t.reeval_status === "pending";
+
 // Single source of truth for the krill create payload — used by BOTH the single
 // and group push paths so the two can't drift (the exact gap that let group push
 // silently drop skip-plan-review). The self-edit guard is enforced HERE, last:
@@ -248,14 +254,22 @@ async function pushItems(
       .map((t) => [t.name, t.krill_task_id as string]),
   );
 
-  const byName = new Map(items.map((t) => [t.name, t]));
-  const ordered = topoByDeps(items, byName);
+  const heldBack = items.filter(isReevalPending);
+  const pushable = items.filter((t) => !isReevalPending(t));
+  const byName = new Map(pushable.map((t) => [t.name, t]));
+  const ordered = topoByDeps(pushable, byName);
   const nameToId: Record<string, string> = {};
-  const results: { name: string; id?: string | null; depends_on?: string[]; error?: string; deferred?: boolean; blockedBy?: string[] }[] = [];
+  const results: { name: string; id?: string | null; depends_on?: string[]; error?: string; deferred?: boolean; blockedBy?: string[]; gatedBy?: string[] }[] = [];
   const deferredNames = new Set<string>();
   // Fetch krill's stage medians once for the whole batch (tolerant: {} on error).
   const medians = await krill.getUsageMedians();
   for (const t of ordered) {
+    const gates = gateDeps(t);
+    if (gates.length && t.reeval_status == null) {
+      deferredNames.add(t.name);
+      results.push({ name: t.name, deferred: true, gatedBy: gates });
+      continue;
+    }
     const deps = JSON.parse(t.deps || "[]") as string[];
     const depIds: string[] = [];
     const missing: string[] = [];
@@ -292,6 +306,7 @@ async function pushItems(
     pushed: results.filter((r) => r.id).length,
     deferred: deferredNames.size,
     total: items.length,
+    heldBack: heldBack.length,
     results,
     warning: warning ?? depWarning,
   };
@@ -444,6 +459,28 @@ export async function enrichPushed(items: ProposedTask[]): Promise<EnrichedPropo
     }
   }
 
+  const allProposed = listProposed();
+  for (const t of items) {
+    if (!t.krill_task_id) continue;
+    const k = byId.get(t.krill_task_id);
+    if (!k || (k.status !== "DONE" && k.status !== "CANCELED")) continue;
+    const dependents = allProposed.filter((d) => {
+      const deps = JSON.parse(d.deps || "[]") as string[];
+      if (!deps.includes(t.name)) return false;
+      const types = JSON.parse(d.dep_types || "{}") as Record<string, string>;
+      return types[t.name] === "gate";
+    });
+    for (const d of dependents) {
+      if (d.reeval_status === "pending") continue;
+      if (d.reeval_source === t.id && d.reeval_status) continue;
+      updateProposed(d.id, {
+        reeval_status: "pending",
+        reeval_source: t.id,
+        reeval_note: `gate "${t.name}" observed ${k.status}`,
+      });
+    }
+  }
+
   return items.map((t) =>
     t.krill_task_id && (t.status === "pushed" || t.status === "push_failed")
       ? { ...t, krill_status: byId.get(t.krill_task_id)?.status ?? null }
@@ -460,6 +497,9 @@ export async function push(id: string, { confirm = false }: { confirm?: boolean 
   // here would otherwise create a duplicate krill task and overwrite the id.
   if (t.status === "pushed" && t.krill_task_id) {
     return { task: t, pushed: false, alreadyPushed: true, message: `already in krill as ${t.krill_task_id}` };
+  }
+  if (isReevalPending(t)) {
+    return { task: t, pushed: false, heldBack: 1, message: "held — pending re-evaluation" };
   }
   if (t.auto_publish && !isProtected(t.project_key) && !confirm) {
     return { task: t, pushed: false, needsConfirm: true, message: "This task auto-finishes (auto-merge to main, no review). Re-confirm to arm." };
@@ -487,6 +527,10 @@ export async function push(id: string, { confirm = false }: { confirm?: boolean 
     // Resolve dependencies against already-pushed siblings. Refuse rather than
     // push with deps silently dropped — a dep-blocked task landing in krill
     // with no depends_on is exactly the bug WH-11 fixes.
+    const gates = gateDeps(t);
+    if (gates.length && t.reeval_status == null) {
+      return { task: t, pushed: false, deferred: true, gatedBy: gates, message: `gated by ${gates.join(", ")} (awaiting re-evaluation)` };
+    }
     const deps = JSON.parse(t.deps || "[]") as string[];
     let depIds: string[] = [];
     if (deps.length) {

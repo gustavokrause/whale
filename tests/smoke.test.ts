@@ -16,7 +16,7 @@ import {
 } from "../src/db/queries";
 import { blockers } from "../src/db/schema";
 import { triage, flowPreview, plan, canonicalizeProjectDeps } from "../src/lib/stages";
-import { push, pushBatch, refine } from "../src/lib/pipeline";
+import { push, pushBatch, refine, enrichPushed } from "../src/lib/pipeline";
 import { classifyBlock } from "../src/lib/runner";
 
 function resetDb() {
@@ -241,6 +241,7 @@ function mockKrill() {
   const orig = globalThis.fetch;
   const calls: { method: string; url: string; body: Record<string, unknown> | undefined }[] = [];
   let seq = 0;
+  let krillTasks: { id: string; status?: string }[] = [];
   globalThis.fetch = (async (url: unknown, opts: { method?: string; body?: string } = {}) => {
     const method = opts.method || "GET";
     const u = String(url);
@@ -253,12 +254,13 @@ function mockKrill() {
       { id: "projK", slug: "KR", name: "krill", folder_path: "/k", has_repo: true },
     ];
     else if (method === "POST" && u.includes("/api/tasks")) data = { id: `kid-${++seq}` };
-    else if (u.includes("/api/tasks")) data = { tasks: [] };
+    else if (u.includes("/api/tasks")) data = krillTasks;
     return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   return {
     calls,
     posts: () => calls.filter((c) => c.method === "POST" && c.url.includes("/api/tasks")),
+    setTasks: (ts: { id: string; status?: string }[]) => { krillTasks = ts; },
     restore: () => { globalThis.fetch = orig; },
   };
 }
@@ -481,4 +483,46 @@ test("proposed_tasks: typed dep edges + premise/reeval columns round-trip", () =
   assert.deepEqual(JSON.parse(canon.deps), ["MV-17 memo"], "deps canonicalized");
   assert.deepEqual(JSON.parse(canon.dep_types), { "MV-17 memo": "gate" }, "dep_types keys canonicalized in lockstep");
   resetDb();
+});
+
+test("WH-17 gate edge: pushBatch defers a gated dependent; DONE gate flips reeval_status; push then held-back", async () => {
+  resetDb();
+  const k = mockKrill();
+  try {
+    const aRow = addProposed({ project_key: "demo-app", name: "A" });
+    addProposed({
+      project_key: "demo-app",
+      name: "B",
+      deps: ["A"],
+      dep_types: { A: "gate" },
+      premise: "assumes GO on A",
+    });
+
+    // pushBatch: A pushes, B deferred (gated — not a missing-dep)
+    const r = await pushBatch(stubTeam as never, "demo-app");
+    assert.equal(r.pushed, 1, "only A pushes");
+    assert.equal(r.deferred, 1, "B is deferred");
+    assert.equal((r as { heldBack?: number }).heldBack ?? 0, 0, "no held-back (no pending reeval yet)");
+    const bResult = (r.results as { name: string; deferred?: boolean; gatedBy?: string[] }[]).find((x) => x.name === "B");
+    assert.equal(bResult?.deferred, true, "B result deferred");
+    assert.deepEqual(bResult?.gatedBy, ["A"], "B gated by A");
+    const bId = listProposed().find((t) => t.name === "B")!.id;
+    assert.equal(getProposed(bId)!.status, "proposed", "B stays proposed");
+
+    // simulate A DONE in krill -> enrichPushed cascades reeval_status to B
+    const aKid = getProposed(aRow.id)!.krill_task_id!;
+    k.setTasks([{ id: aKid, status: "DONE" }]);
+    await enrichPushed(listProposed());
+    assert.equal(getProposed(bId)!.reeval_status, "pending", "B flagged pending re-evaluation");
+    assert.equal(getProposed(bId)!.reeval_source, aRow.id, "reeval_source is A's whale id");
+
+    // push(B) is held-back; B stays proposed
+    const r2 = await push(bId);
+    assert.equal(r2.pushed, false, "push held-back");
+    assert.equal((r2 as { heldBack?: number }).heldBack, 1, "heldBack count is 1");
+    assert.equal(getProposed(bId)!.status, "proposed", "B status unchanged");
+  } finally {
+    k.restore();
+    resetDb();
+  }
 });
