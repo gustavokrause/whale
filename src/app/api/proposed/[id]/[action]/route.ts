@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getTeam } from "@/lib/team";
-import { approve, reject, push, reassign, refine } from "@/lib/pipeline";
+import { approve, reject, push, reassign, refine, reevaluateSubtree, reevalApply, reevalDismiss } from "@/lib/pipeline";
 import { json, fail } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +33,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (!b.input) return fail("input required");
       return json(await refine(team, id, String(b.input)));
     }
+    // id=gate for reevaluate; id=dependent for reeval-apply / reeval-dismiss
+    if (action === "reevaluate") {
+      const b = await body(req);
+      return json(await reevaluateSubtree(team, id, { result: b.result ? String(b.result) : undefined }));
+    }
+    if (action === "reeval-apply")   return json({ task: reevalApply(id) });
+    if (action === "reeval-dismiss") return json({ task: reevalDismiss(id) });
     return fail(`unknown action: ${action}`, 404);
   } catch (e) {
     return fail(e);

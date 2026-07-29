@@ -123,6 +123,7 @@ type ProposedInput = {
   reeval_status?: "pending" | "keep" | "revise" | "park" | "kill" | null;
   reeval_note?: string | null;
   reeval_source?: string | null;
+  reeval_revision?: string | null;
   plan_run_id?: string | null;
   source_entry_id?: string | null;
   label?: string | null;
@@ -153,6 +154,7 @@ export function addProposed(t: ProposedInput): ProposedTask {
       reeval_status: t.reeval_status ?? null,
       reeval_note: t.reeval_note ?? null,
       reeval_source: t.reeval_source ?? null,
+      reeval_revision: t.reeval_revision ?? null,
       label: t.label ?? null,
       acceptance: t.acceptance ?? null,
     expected_impact: t.expected_impact ?? null,

@@ -6,7 +6,8 @@ import { config, isReal } from "./config";
 import {
   getProposed, updateProposed, projectKeys, setEntryLane, listProposed, getEntry,
 } from "@/db/queries";
-import { plan, route, triage, refineProposal, flowPreview, canonicalizeProjectDeps, normalizeDraftDeps } from "./stages";
+import { plan, route, triage, refineProposal, flowPreview, canonicalizeProjectDeps, normalizeDraftDeps, reevaluate } from "./stages";
+import type { ReevalVerdict, DepEdge } from "./stages";
 import { auditComplete } from "./runner";
 import {
   writeContext, listContextKeys, readContext, keyToSlug,
@@ -445,6 +446,138 @@ export async function refine(team: Team, id: string, input: string) {
 }
 
 export const previewFlow = flowPreview;
+
+/* ---------- REEVALUATE subtree (WH-19) ---------- */
+
+// BFS: collect transitive dependents of root within the same project, excluding rejected tasks.
+function collectDescendants(root: ProposedTask): ProposedTask[] {
+  const all = listProposed();
+  const reachableNames = new Set<string>([root.name]);
+  const queue = [root.name];
+  const resultIds = new Set<string>();
+  const result: ProposedTask[] = [];
+  while (queue.length) {
+    const name = queue.shift()!;
+    for (const t of all) {
+      if (resultIds.has(t.id)) continue;
+      if (t.project_key !== root.project_key) continue;
+      if (t.status === "rejected") continue;
+      const deps = JSON.parse(t.deps || "[]") as string[];
+      if (deps.some((d) => reachableNames.has(d))) {
+        resultIds.add(t.id);
+        reachableNames.add(t.name);
+        queue.push(t.name);
+        result.push(t);
+      }
+    }
+  }
+  return result;
+}
+
+/** Run the reevaluate stage against a gate task and persist per-dependent
+ *  verdicts (+ revision blob for verdict=revise). Never applies the revision,
+ *  never parks, never kills — human review is the gate.
+ *  opts.result: operator-pasted result doc — overrides krill.getTaskResult(). */
+export async function reevaluateSubtree(
+  team: Team,
+  gateTaskId: string,
+  opts?: { result?: string },
+): Promise<{ ok: boolean; needsResult?: boolean; gate: string; verdicts?: ReevalVerdict[] }> {
+  const gate = getProposed(gateTaskId);
+  if (!gate) throw new Error(`proposed task ${gateTaskId} not found`);
+
+  let result = opts?.result || null;
+  if (!result && gate.krill_task_id) {
+    result = await krill.getTaskResult(gate.krill_task_id);
+  }
+  if (!result) return { ok: false, needsResult: true, gate: gateTaskId };
+
+  const dependents = collectDescendants(gate);
+  const all = listProposed();
+  const projectRejected = all
+    .filter((t) => t.project_key === gate.project_key && t.status === "rejected")
+    .map((t) => t.name);
+
+  const verdicts = await reevaluate(team, {
+    gate,
+    result,
+    context: readContext(gate.project_key),
+    dependents,
+    projectRejected,
+  });
+
+  for (const v of verdicts) {
+    const revision =
+      v.verdict === "revise"
+        ? JSON.stringify({
+            revised_name: v.revised_name,
+            revised_description: v.revised_description,
+            revised_acceptance: v.revised_acceptance,
+            revised_depends_on: v.revised_depends_on,
+          })
+        : null;
+    updateProposed(v.target_id, {
+      reeval_status: v.verdict,
+      reeval_note: v.note,
+      reeval_source: gate.id,
+      reeval_revision: revision,
+    });
+  }
+
+  return { ok: true, gate: gate.id, verdicts };
+}
+
+/** Apply a pending verdict. Sole writer of the revised canonical fields. */
+export function reevalApply(id: string): ProposedTask {
+  const t = getProposed(id);
+  if (!t) throw new Error(`proposed task ${id} not found`);
+
+  const clearReeval = {
+    reeval_status: null as string | null,
+    reeval_note: null as string | null,
+    reeval_source: null as string | null,
+    reeval_revision: null as string | null,
+  };
+
+  if (t.reeval_status === "keep") return updateProposed(id, clearReeval);
+  if (t.reeval_status === "park") return updateProposed(id, { disabled: true, ...clearReeval });
+  if (t.reeval_status === "kill") return updateProposed(id, { status: "rejected", ...clearReeval });
+
+  if (t.reeval_status === "revise") {
+    const rev = JSON.parse(t.reeval_revision || "{}") as {
+      revised_name?: string;
+      revised_description?: string;
+      revised_acceptance?: string;
+      revised_depends_on?: DepEdge[];
+    };
+    const patch: Record<string, unknown> = { ...clearReeval };
+    if (rev.revised_name) patch.name = rev.revised_name;
+    if (rev.revised_description) patch.description = rev.revised_description;
+    if (rev.revised_acceptance) patch.acceptance = rev.revised_acceptance;
+    if (Array.isArray(rev.revised_depends_on)) {
+      const { deps, dep_types } = normalizeDraftDeps(rev.revised_depends_on);
+      patch.deps = JSON.stringify(deps);
+      patch.dep_types = JSON.stringify(dep_types);
+    }
+    const updated = updateProposed(id, patch as Parameters<typeof updateProposed>[1]);
+    canonicalizeProjectDeps(t.project_key);
+    return updated;
+  }
+
+  throw new Error(`no pending verdict on task ${id} (reeval_status=${t.reeval_status ?? "null"})`);
+}
+
+/** Clear a pending verdict back to NULL without applying. */
+export function reevalDismiss(id: string): ProposedTask {
+  const t = getProposed(id);
+  if (!t) throw new Error(`proposed task ${id} not found`);
+  return updateProposed(id, {
+    reeval_status: null,
+    reeval_note: null,
+    reeval_source: null,
+    reeval_revision: null,
+  });
+}
 
 export type EnrichedProposed = ProposedTask & { krill_status?: string | null };
 

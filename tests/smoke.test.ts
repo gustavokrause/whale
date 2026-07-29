@@ -16,7 +16,7 @@ import {
 } from "../src/db/queries";
 import { blockers } from "../src/db/schema";
 import { triage, flowPreview, plan, canonicalizeProjectDeps } from "../src/lib/stages";
-import { push, pushBatch, refine, enrichPushed, reject } from "../src/lib/pipeline";
+import { push, pushBatch, refine, enrichPushed, reject, reevaluateSubtree, reevalApply } from "../src/lib/pipeline";
 import { classifyBlock } from "../src/lib/runner";
 
 function resetDb() {
@@ -551,4 +551,65 @@ test("WH-17 gate edge: pushBatch defers a gated dependent; DONE gate flips reeva
     k.restore();
     resetDb();
   }
+});
+
+test("WH-19 reevaluateSubtree: verdicts kill/keep/revise; reevalApply only changes the target", async () => {
+  resetDb();
+
+  // R is a rejected sibling (d3 depends on it and must be revised)
+  const rejected = addProposed({ project_key: "demo-app", name: "R" });
+  updateProposed(rejected.id, { status: "rejected" });
+
+  // Gate task (krill_task_id set so reevaluateSubtree could theoretically call krill)
+  const gate = addProposed({ project_key: "demo-app", name: "G", label: "g" });
+  updateProposed(gate.id, { krill_task_id: "kid-g" });
+
+  // d1: contradicted premise → kill
+  const d1 = addProposed({
+    project_key: "demo-app", name: "D1",
+    deps: ["G"], dep_types: { G: "gate" },
+    premise: "assumes GO on G",
+  });
+  // d2: valid premise → keep
+  const d2 = addProposed({
+    project_key: "demo-app", name: "D2",
+    deps: ["G"], dep_types: { G: "gate" },
+    premise: "assumes user wants X",
+  });
+  // d3: dep on rejected R → revise (R dropped from deps)
+  const d3 = addProposed({
+    project_key: "demo-app", name: "D3",
+    deps: ["G", "R"], dep_types: { G: "gate" },
+  });
+
+  // result doc names the contradicted premise using the stub protocol
+  const result = "gate G done. CONTRADICTED: assumes GO on G";
+  const r = await reevaluateSubtree(stubTeam as never, gate.id, { result });
+
+  assert.equal(r.ok, true, "reevaluateSubtree ok");
+  assert.equal(getProposed(d1.id)!.reeval_status, "kill",   "d1 verdict=kill (contradicted premise)");
+  assert.equal(getProposed(d2.id)!.reeval_status, "keep",   "d2 verdict=keep (premise valid)");
+  assert.equal(getProposed(d3.id)!.reeval_status, "revise", "d3 verdict=revise (dep on rejected R)");
+  for (const d of [d1, d2, d3])
+    assert.ok(getProposed(d.id)!.reeval_note?.length, `${d.name} has non-empty reeval_note`);
+
+  // snapshot canonical fields before any apply
+  type Snap = { name: string; description: string; deps: string; status: string };
+  const snap = (id: string): Snap => {
+    const t = getProposed(id)!;
+    return { name: t.name, description: t.description, deps: t.deps, status: t.status };
+  };
+  const before = { d1: snap(d1.id), d2: snap(d2.id), d3: snap(d3.id) };
+
+  // apply only d3
+  reevalApply(d3.id);
+
+  const after = { d1: snap(d1.id), d2: snap(d2.id), d3: snap(d3.id) };
+  assert.deepEqual(after.d1, before.d1, "d1 canonical fields unchanged");
+  assert.deepEqual(after.d2, before.d2, "d2 canonical fields unchanged");
+  assert.notDeepEqual(after.d3, before.d3, "d3 changed after apply");
+  assert.deepEqual(JSON.parse(getProposed(d3.id)!.deps), ["G"], "R dropped from d3.deps");
+  assert.equal(getProposed(d3.id)!.reeval_status, null, "d3 reeval cleared after apply");
+
+  resetDb();
 });
