@@ -78,7 +78,7 @@ test("C3: refine/reject skip silently when the project has no context", async ()
   await refine(stubTeam as never, t.id, "steer it");
   const t2 = addProposed({ project_key: "ghost", name: "z", description: "d" });
   const rejected = reject(t2.id);
-  assert.equal(rejected.status, "rejected", "reject still lands");
+  assert.equal(rejected.task.status, "rejected", "reject still lands");
   assert.equal(readContext("ghost"), "", "no context file created");
   resetDb();
 });

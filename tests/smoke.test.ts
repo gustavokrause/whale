@@ -16,7 +16,7 @@ import {
 } from "../src/db/queries";
 import { blockers } from "../src/db/schema";
 import { triage, flowPreview, plan, canonicalizeProjectDeps } from "../src/lib/stages";
-import { push, pushBatch, refine, enrichPushed } from "../src/lib/pipeline";
+import { push, pushBatch, refine, enrichPushed, reject } from "../src/lib/pipeline";
 import { classifyBlock } from "../src/lib/runner";
 
 function resetDb() {
@@ -482,6 +482,32 @@ test("proposed_tasks: typed dep edges + premise/reeval columns round-trip", () =
   const canon = getProposed(child2.id)!;
   assert.deepEqual(JSON.parse(canon.deps), ["MV-17 memo"], "deps canonicalized");
   assert.deepEqual(JSON.parse(canon.dep_types), { "MV-17 memo": "gate" }, "dep_types keys canonicalized in lockstep");
+  resetDb();
+});
+
+test("WH-20 reject: flags direct dependents with pending re-eval; leaves dep edges + unrelated tasks untouched", () => {
+  resetDb();
+  const a = addProposed({ project_key: "demo-app", name: "A" });
+  const b = addProposed({ project_key: "demo-app", name: "B", deps: ["A"] });
+  const c = addProposed({ project_key: "demo-app", name: "C", deps: ["A"] });
+  const d = addProposed({ project_key: "demo-app", name: "D" });
+
+  const r = reject(a.id);
+  assert.equal(r.task.status, "rejected", "A is rejected");
+
+  const flaggedNames = r.flagged.map((f) => f.name).sort();
+  assert.deepEqual(flaggedNames, ["B", "C"], "B and C flagged");
+
+  const bRow = getProposed(b.id)!;
+  assert.equal(bRow.reeval_status, "pending", "B reeval_status = pending");
+  assert.equal(bRow.reeval_source, a.id, "B reeval_source = A's id");
+  assert.match(bRow.reeval_note ?? "", /A/, "reeval_note names the rejected task");
+  assert.deepEqual(JSON.parse(bRow.deps), ["A"], "B.deps unchanged — edge not stripped");
+
+  const dRow = getProposed(d.id)!;
+  assert.equal(dRow.reeval_status, null, "D untouched");
+
+  assert.ok(r.note && r.note.includes("2"), "note reports 2 flagged dependents");
   resetDb();
 });
 
