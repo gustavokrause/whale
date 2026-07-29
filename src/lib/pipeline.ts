@@ -349,6 +349,33 @@ function distillPrinciple(projectKey: string, bullet: string) {
   }
 }
 
+// Flag every same-project non-rejected dependent of `source` with a pending
+// re-evaluation. Idempotent: skips the stamp when already flagged from this
+// source, but still includes the row in the returned list. Does NOT strip the
+// dep edge — visibility of the corpse is the point.
+function flagDependents(
+  source: ProposedTask,
+  reason: string,
+): { id: string; name: string }[] {
+  const all = listProposed();
+  const flagged: { id: string; name: string }[] = [];
+  for (const d of all) {
+    if (d.id === source.id) continue;
+    if (d.project_key !== source.project_key) continue;
+    if (d.status === "rejected") continue;
+    const deps = JSON.parse(d.deps || "[]") as string[];
+    if (!deps.includes(source.name)) continue;
+    flagged.push({ id: d.id, name: d.name });
+    if (d.reeval_status === "pending" && d.reeval_source === source.id) continue;
+    updateProposed(d.id, {
+      reeval_status: "pending",
+      reeval_source: source.id,
+      reeval_note: reason,
+    });
+  }
+  return flagged;
+}
+
 export function reject(id: string) {
   const t = getProposed(id);
   const updated = updateProposed(id, { status: "rejected" });
@@ -358,8 +385,15 @@ export function reject(id: string) {
       t.project_key,
       `- [${date}] rejected "${t.name}": ${(t.description || "").slice(0, 120)}`,
     );
+    const reason = `depends on rejected "${t.name}" — re-evaluate or rewrite dep`;
+    const flagged = flagDependents(t, reason);
+    const note =
+      flagged.length > 0
+        ? `rejected; ${flagged.length} dependent(s) flagged for re-evaluation: ${flagged.map((f) => f.name).join(", ")}`
+        : undefined;
+    return { task: updated, flagged, note };
   }
-  return updated;
+  return { task: updated, flagged: [] as { id: string; name: string }[], note: undefined };
 }
 
 /** Refine a proposed task from user Input (B3). */
