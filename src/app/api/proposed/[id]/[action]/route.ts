@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const team = await getTeam();
     if (action === "approve") return json(await approve(team, id));
-    if (action === "reject") return json({ task: reject(id) });
+    if (action === "reject") return json(reject(id));
     if (action === "push") {
       const b = await body(req);
       return json(await push(id, { confirm: !!b.confirm }));
