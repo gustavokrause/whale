@@ -30,6 +30,36 @@ const gateDeps = (t: ProposedTask): string[] => {
 };
 const isReevalPending = (t: ProposedTask) => t.reeval_status === "pending";
 
+/**
+ * Gate names holding this task back from krill: gate edges whose upstream has
+ * NOT yet been re-evaluated for this task.
+ *
+ * The guard cannot key on `reeval_status == null` — that is also the state after
+ * the operator applies a verdict, which would defer the task permanently. It
+ * keys on the durable resolved-set instead. A gate that has not finished yet is
+ * already blocked by ordinary dependency ordering (its upstream is not DONE in
+ * krill), so this only has to cover "gate finished, verdict not resolved".
+ *
+ * Pass `all` when calling in a loop — otherwise every call re-reads the table.
+ */
+export function unresolvedGates(t: ProposedTask, all?: ProposedTask[]): string[] {
+  const gates = gateDeps(t);
+  if (gates.length === 0) return [];
+  if (t.reeval_status === "pending") return gates;
+  const resolved = reevalResolvedIds(t);
+  const byName = new Map((all ?? listProposed()).map((p) => [p.name, p]));
+  return gates.filter((n) => {
+    const up = byName.get(n);
+    // Fail OPEN when the upstream no longer exists as a proposal (deleted, or an
+    // edge naming something that was never distilled). There is no row to run
+    // Re-evaluate on, so blocking would strand the dependent permanently with no
+    // in-app way out. Ordinary dep ordering still refuses the push if that name
+    // is genuinely unsatisfied; a gate that isn't there gates nothing.
+    if (!up) return false;
+    return !resolved.includes(up.id);
+  });
+}
+
 // Single source of truth for the krill create payload — used by BOTH the single
 // and group push paths so the two can't drift (the exact gap that let group push
 // silently drop skip-plan-review). The self-edit guard is enforced HERE, last:
@@ -248,9 +278,11 @@ async function pushItems(
     ? await autoFinishWarning(projectId, projectKey, autoFin.length)
     : undefined;
 
-  // Already-pushed siblings in this project (for cross-batch/dump dep resolution).
+  // One table read for the whole batch: both the already-pushed sibling map
+  // (cross-batch/dump dep resolution) and the per-task gate check below read it.
+  const allProposed = listProposed();
   const pushedByName = new Map(
-    listProposed()
+    allProposed
       .filter((t) => t.project_key === projectKey && t.krill_task_id)
       .map((t) => [t.name, t.krill_task_id as string]),
   );
@@ -265,8 +297,8 @@ async function pushItems(
   // Fetch krill's stage medians once for the whole batch (tolerant: {} on error).
   const medians = await krill.getUsageMedians();
   for (const t of ordered) {
-    const gates = gateDeps(t);
-    if (gates.length && t.reeval_status == null) {
+    const gates = unresolvedGates(t, allProposed);
+    if (gates.length) {
       deferredNames.add(t.name);
       results.push({ name: t.name, deferred: true, gatedBy: gates });
       continue;
@@ -474,26 +506,105 @@ function collectDescendants(root: ProposedTask): ProposedTask[] {
   return result;
 }
 
+/**
+ * A dependent already carrying a REAL verdict (not a bare `pending` flag) that a
+ * DIFFERENT gate wrote and the operator has not resolved yet.
+ *
+ * Two gates over one subtree is the normal shape, not an edge case — the whale
+ * board has two, and `collectDescendants` walks every edge, so both reach the
+ * same 14 tasks. Without this, running the second gate silently replaces the
+ * first gate's unreviewed verdicts and the operator never learns what was lost.
+ * `pending` is not protected: it is a flag, not a judgement, and replacing it
+ * with a real verdict is the upgrade the operator wants.
+ */
+function heldByAnotherGate(t: ProposedTask, gateId: string): boolean {
+  return (
+    t.reeval_status != null &&
+    t.reeval_status !== "pending" &&
+    t.reeval_source != null &&
+    t.reeval_source !== gateId
+  );
+}
+
+export type ReevalSkipped = { id: string; name: string; verdict: string; heldBy: string };
+
 /** Run the reevaluate stage against a gate task and persist per-dependent
  *  verdicts (+ revision blob for verdict=revise). Never applies the revision,
  *  never parks, never kills — human review is the gate.
- *  opts.result: operator-pasted result doc — overrides krill.getTaskResult(). */
+ *  opts.result: operator-pasted result doc — overrides krill.getTaskResult().
+ *  opts.overwrite: also re-judge dependents holding another gate's verdict. */
 export async function reevaluateSubtree(
   team: Team,
   gateTaskId: string,
-  opts?: { result?: string },
-): Promise<{ ok: boolean; needsResult?: boolean; gate: string; verdicts?: ReevalVerdict[] }> {
+  opts?: { result?: string; preview?: boolean; overwrite?: boolean },
+): Promise<{
+  ok: boolean;
+  needsResult?: boolean;
+  preview?: boolean;
+  result?: string | null;
+  /** Where `result` came from — "pasted" when the operator supplied it. */
+  resultSource?: krill.TaskOutcome["source"] | "pasted" | null;
+  krillStatus?: string | null;
+  dependents?: string[];
+  skipped?: ReevalSkipped[];
+  gate: string;
+  verdicts?: ReevalVerdict[];
+}> {
   const gate = getProposed(gateTaskId);
   if (!gate) throw new Error(`proposed task ${gateTaskId} not found`);
 
   let result = opts?.result || null;
+  let resultSource: krill.TaskOutcome["source"] | "pasted" | null = result ? "pasted" : null;
+  let krillStatus: string | null = null;
   if (!result && gate.krill_task_id) {
-    result = await krill.getTaskResult(gate.krill_task_id);
+    const outcome = await krill.getTaskOutcome(gate.krill_task_id);
+    result = outcome?.text ?? null;
+    resultSource = outcome?.source ?? null;
+    krillStatus = outcome?.krill_status ?? null;
   }
+
+  const all = listProposed();
+  const nameById = new Map(all.map((t) => [t.id, t.name]));
+  const describeHeld = (t: ProposedTask): ReevalSkipped => ({
+    id: t.id,
+    name: t.name,
+    verdict: t.reeval_status as string,
+    heldBy: nameById.get(t.reeval_source as string) ?? (t.reeval_source as string),
+  });
+
+  // preview = show the operator what whale read from krill, WITHOUT spending a
+  // model call. This exists because krill's stored outcome can be stale or
+  // incomplete: a research task marked DONE months before its findings land
+  // still reads as whatever diff it produced at the time. Judging 14 downstream
+  // tasks against the wrong text is worse than asking. It also reports the
+  // collisions up front, so "this replaces 6 verdicts" is a decision the
+  // operator makes rather than something they discover afterwards.
+  if (opts?.preview) {
+    const reachable = collectDescendants(gate);
+    return {
+      ok: true,
+      preview: true,
+      gate: gateTaskId,
+      result,
+      resultSource,
+      krillStatus,
+      dependents: reachable.map((d) => d.name),
+      skipped: reachable.filter((d) => heldByAnotherGate(d, gate.id)).map(describeHeld),
+    };
+  }
+
   if (!result) return { ok: false, needsResult: true, gate: gateTaskId };
 
-  const dependents = collectDescendants(gate);
-  const all = listProposed();
+  const reachable = collectDescendants(gate);
+  const held = reachable.filter((d) => heldByAnotherGate(d, gate.id));
+  const skipped = opts?.overwrite ? [] : held.map(describeHeld);
+  const skippedIds = new Set(skipped.map((s) => s.id));
+  const dependents = reachable.filter((d) => !skippedIds.has(d.id));
+
+  // Everything downstream is spoken for by another gate — no call to make.
+  if (dependents.length === 0) {
+    return { ok: true, gate: gateTaskId, verdicts: [], skipped };
+  }
   const projectRejected = all
     .filter((t) => t.project_key === gate.project_key && t.status === "rejected")
     .map((t) => t.name);
@@ -506,7 +617,12 @@ export async function reevaluateSubtree(
     projectRejected,
   });
 
-  for (const v of verdicts) {
+  // The model is told which tasks to judge, but the write is scoped to that set
+  // here too: a verdict aimed at a task we deliberately skipped would reintroduce
+  // exactly the clobbering this guards against.
+  const judgedIds = new Set(dependents.map((d) => d.id));
+  const written = verdicts.filter((v) => judgedIds.has(v.target_id));
+  for (const v of written) {
     const revision =
       v.verdict === "revise"
         ? JSON.stringify({
@@ -524,10 +640,36 @@ export async function reevaluateSubtree(
     });
   }
 
-  return { ok: true, gate: gate.id, verdicts };
+  return { ok: true, gate: gate.id, verdicts: written, skipped };
 }
 
 /** Apply a pending verdict. Sole writer of the revised canonical fields. */
+/**
+ * Record that this gate's resolution has been dealt with for this task, so the
+ * verdict fields can be cleared without the poll re-stamping it or the push
+ * guard deferring it forever. Appended, never replaced: a task with two gate
+ * edges must remember both.
+ */
+function resolvedWith(t: ProposedTask): string {
+  let seen: string[] = [];
+  try {
+    const parsed = JSON.parse(t.reeval_resolved || "[]");
+    if (Array.isArray(parsed)) seen = parsed.filter((x): x is string => typeof x === "string");
+  } catch { seen = []; }
+  if (t.reeval_source && !seen.includes(t.reeval_source)) seen.push(t.reeval_source);
+  return JSON.stringify(seen);
+}
+
+/** Gate ids this task has already been re-evaluated against. */
+export function reevalResolvedIds(t: ProposedTask): string[] {
+  try {
+    const parsed = JSON.parse(t.reeval_resolved || "[]");
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function reevalApply(id: string): ProposedTask {
   const t = getProposed(id);
   if (!t) throw new Error(`proposed task ${id} not found`);
@@ -537,6 +679,7 @@ export function reevalApply(id: string): ProposedTask {
     reeval_note: null as string | null,
     reeval_source: null as string | null,
     reeval_revision: null as string | null,
+    reeval_resolved: resolvedWith(t),
   };
 
   if (t.reeval_status === "keep") return updateProposed(id, clearReeval);
@@ -571,15 +714,34 @@ export function reevalApply(id: string): ProposedTask {
 export function reevalDismiss(id: string): ProposedTask {
   const t = getProposed(id);
   if (!t) throw new Error(`proposed task ${id} not found`);
+  // Dismiss is also a resolution — the operator looked and chose to change
+  // nothing. Recording it stops the poll from re-raising the same flag.
   return updateProposed(id, {
     reeval_status: null,
     reeval_note: null,
     reeval_source: null,
     reeval_revision: null,
+    reeval_resolved: resolvedWith(t),
   });
 }
 
-export type EnrichedProposed = ProposedTask & { krill_status?: string | null };
+export type EnrichedProposed = ProposedTask & { krill_status?: string | null; gated_by?: string[] };
+
+/**
+ * Stamp every row with the gate names still holding it back from krill.
+ *
+ * The push guard lives on the server, so the UI must not re-derive it: a second
+ * copy of the rule drifts, and the visible failure is the UI offering a Push the
+ * server then refuses. Single implementation, shipped as data.
+ *
+ * Rows are re-read from the DB before the check because callers commonly hold a
+ * copy from before `enrichPushed` stamped `pending` on it.
+ */
+export function withGateState<T extends ProposedTask>(items: T[]): (T & { gated_by: string[] })[] {
+  const all = listProposed();
+  const byId = new Map(all.map((p) => [p.id, p]));
+  return items.map((t) => ({ ...t, gated_by: unresolvedGates(byId.get(t.id) ?? t, all) }));
+}
 
 /**
  * Gap A — krill→whale status sync. whale is otherwise fire-and-forget; this reads
@@ -647,6 +809,9 @@ export async function enrichPushed(items: ProposedTask[]): Promise<EnrichedPropo
     for (const d of dependents) {
       if (d.reeval_status === "pending") continue;
       if (d.reeval_source === t.id && d.reeval_status) continue;
+      // Already resolved against THIS gate — re-raising it would undo the
+      // operator's apply/dismiss on the next poll (every few seconds).
+      if (reevalResolvedIds(d).includes(t.id)) continue;
       updateProposed(d.id, {
         reeval_status: "pending",
         reeval_source: t.id,
@@ -701,8 +866,8 @@ export async function push(id: string, { confirm = false }: { confirm?: boolean 
     // Resolve dependencies against already-pushed siblings. Refuse rather than
     // push with deps silently dropped — a dep-blocked task landing in krill
     // with no depends_on is exactly the bug WH-11 fixes.
-    const gates = gateDeps(t);
-    if (gates.length && t.reeval_status == null) {
+    const gates = unresolvedGates(t);
+    if (gates.length) {
       return { task: t, pushed: false, deferred: true, gatedBy: gates, message: `gated by ${gates.join(", ")} (awaiting re-evaluation)` };
     }
     const deps = JSON.parse(t.deps || "[]") as string[];

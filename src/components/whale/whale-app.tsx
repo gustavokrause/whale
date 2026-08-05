@@ -28,6 +28,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useDialog } from "@/components/ui/dialog-provider";
 import { PushReview, type PushEdit } from "@/components/whale/push-review";
+import { GateOutcomeDialog, type GatePreview } from "@/components/whale/gate-outcome-dialog";
 import { BlockersBanner } from "@/components/whale/blockers-banner";
 import { WhaleIcon } from "@/components/app/whale-icon";
 import { HashId } from "@/components/ui/hash-id";
@@ -37,7 +38,7 @@ type Status = {
   runner: string;
   autonomy: { bypass: string; autoPush: boolean };
   inbox: { total: number; raw: number };
-  proposed: { total: number };
+  proposed: { total: number; flagged?: number };
   krill: { up: boolean; url: string };
 };
 
@@ -233,9 +234,18 @@ export function WhaleApp() {
     window.location.hash = t;
   };
 
+  // The badge counts work, not inventory: "104" is a number nobody acts on, and
+  // it hid the three rows that actually wanted a human. Falls back to the total
+  // when nothing is flagged, so the tab still says how much is on the board.
+  const flagged = status?.proposed.flagged ?? 0;
   const counts: Partial<Record<Tab, number>> = {
     inbox: status?.inbox.raw || 0,
-    proposed: status?.proposed.total || 0,
+    proposed: flagged || status?.proposed.total || 0,
+  };
+  const countTitles: Partial<Record<Tab, string>> = {
+    proposed: flagged
+      ? `${flagged} awaiting your review · ${status?.proposed.total ?? 0} on the board`
+      : `${status?.proposed.total ?? 0} on the board`,
   };
 
   return (
@@ -270,7 +280,16 @@ export function WhaleApp() {
                 <Icon className={`h-4 w-4 shrink-0 ${on ? "text-primary" : ""}`} />
                 <span className="flex-1 text-left">{label}</span>
                 {n > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${on ? "bg-primary/15 text-primary" : "bg-border text-text-2"}`}>
+                  <span
+                    title={countTitles[id]}
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                      id === "proposed" && flagged > 0
+                        ? "bg-warning/20 text-warning"
+                        : on
+                          ? "bg-primary/15 text-primary"
+                          : "bg-border text-text-2"
+                    }`}
+                  >
                     {n}
                   </span>
                 )}
@@ -376,6 +395,11 @@ const pushBtn =
 // Compact destructive (Reject / delete) — same size family, danger outline.
 const dangerSm =
   "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-danger border border-danger/40 hover:bg-danger/10";
+// The one live action inside a re-eval band. Filled, not outlined: the band is
+// already a warning-tinted box, so an outline button disappears into it — and
+// this slot must never look optional next to Dismiss.
+const primarySm =
+  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-warning text-black border border-transparent hover:bg-warning/90 disabled:cursor-not-allowed";
 
 function usePersistedSet(key: string): [Set<string>, (id: string) => void] {
   const [set, setSet] = useState<Set<string>>(() => {
@@ -758,9 +782,60 @@ function ContextTab({ withBusy, rev, jobs }: { withBusy: Busy; rev: number; jobs
   );
 }
 
-type EnrichedTask = ProposedTask & { krill_status?: string | null; source_entry_text?: string | null };
+type EnrichedTask = ProposedTask & {
+  krill_status?: string | null;
+  source_entry_text?: string | null;
+  // Gate names still blocking this task from krill — the server's push guard,
+  // shipped as data rather than re-derived here (see withGateState).
+  gated_by?: string[];
+};
 
 const hasReeval = (t: EnrichedTask) => t.reeval_status != null;
+
+/**
+ * A dump's raw text as a group heading.
+ *
+ * Slicing the raw text at N chars cuts mid-word and mid-parenthesis, which is
+ * how a heading ends up reading `…(SALT_ROUNDS = 12) — nunca armazenadas em (`.
+ * Take the first sentence or line instead, and only then cap it — the full text
+ * stays available on hover.
+ */
+const dumpTitle = (text?: string | null) => {
+  const raw = (text ?? "").trim();
+  if (!raw) return "dump";
+  const first = (raw.split(/\n/)[0] ?? raw).trim();
+  const sentence = (first.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? first).trim();
+  const pick = sentence.length >= 12 ? sentence : first;
+  return pick.length > 80 ? pick.slice(0, 79).replace(/\s+\S*$/, "") + "…" : pick;
+};
+
+// A gate only has an outcome to judge against once krill finished it. Shared by
+// the gate row's own Re-evaluate button and by the band on every dependent, so
+// the two surfaces can never offer an action the other refuses.
+const gateHasOutcome = (t?: EnrichedTask | null) =>
+  !!t && t.status === "pushed" && (t.krill_status === "DONE" || t.krill_status === "CANCELED");
+
+const gateNotReadyReason = (t?: EnrichedTask | null) =>
+  !t
+    ? "the gate task no longer exists"
+    : t.status === "pushed"
+      ? `it is still running in krill (${t.krill_status ?? "no status"}) — re-evaluate once it reaches DONE or CANCELED`
+      : "it hasn't run yet — push it to krill and let it finish first";
+
+/**
+ * Scroll another task's row into view and flash it.
+ *
+ * The band names the gate the operator has to act on, and on this board that row
+ * can be a screen or more away. "Go find MV-17" is not an instruction — this
+ * makes the name the navigation.
+ */
+function jumpToTask(id: string) {
+  const el = document.getElementById(`task-${id}`);
+  if (!el) return;
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.classList.add("ring-2", "ring-primary", "ring-inset");
+  setTimeout(() => el.classList.remove("ring-2", "ring-primary", "ring-inset"), 1600);
+}
 
 type ReevalRevision = {
   revised_name?: string;
@@ -769,9 +844,31 @@ type ReevalRevision = {
   revised_depends_on?: (string | { label: string; type?: string })[];
 };
 
-function ReevalBand({ t, act, nameFromId }: { t: EnrichedTask; act: (id: string, action: string) => Promise<void>; nameFromId: (id: string | null) => string }) {
+function ReevalBand({
+  t,
+  act,
+  nameFromId,
+  sourceTask,
+  onReevaluate,
+  onRewriteDeps,
+  onReject,
+}: {
+  t: EnrichedTask;
+  act: (id: string, action: string) => Promise<void>;
+  nameFromId: (id: string | null) => string;
+  sourceTask: EnrichedTask | undefined;
+  onReevaluate: (gate: EnrichedTask) => void;
+  onRewriteDeps: () => void;
+  onReject: () => void;
+}) {
   const verdict = t.reeval_status!;
   const isPending = verdict === "pending";
+  // A pending flag has two very different origins: a gate that finished (an
+  // outcome exists, someone has to run it) and a dependency that was rejected
+  // (no outcome will ever exist). They need different controls, not different
+  // sentences.
+  const rejectedSource = sourceTask?.status === "rejected";
+  const gateReady = gateHasOutcome(sourceTask);
   const vc: Record<string, { cls: string }> = {
     pending: { cls: "bg-warning/20 text-warning" },
     keep: { cls: "bg-success/20 text-success" },
@@ -797,9 +894,40 @@ function ReevalBand({ t, act, nameFromId }: { t: EnrichedTask; act: (id: string,
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${cls}`}>
           <AlertTriangle className="h-3 w-3" /> re-eval: {verdict}
         </span>
-        {t.reeval_note && <span className="text-text-2">{t.reeval_note}</span>}
-        <span className="text-text-3">trigger: {nameFromId(t.reeval_source)}</span>
+        {/* On a verdict the note is the model's reasoning — worth every word. On a
+            pending flag it is a machine string that repeats the upstream's full
+            100-char title, which the trigger ref beside it already names. */}
+        {!isPending && t.reeval_note && <span className="text-text-2">{t.reeval_note}</span>}
+        <span className="text-text-3">
+          trigger:{" "}
+          {t.reeval_source && sourceTask ? (
+            <button
+              type="button"
+              className="underline decoration-dotted underline-offset-2 hover:text-text"
+              onClick={() => jumpToTask(t.reeval_source!)}
+              title="Jump to that task"
+            >
+              {nameFromId(t.reeval_source)}
+            </button>
+          ) : (
+            nameFromId(t.reeval_source)
+          )}
+        </span>
       </div>
+      {/* A pending stamp means "something upstream changed" — it is NOT a verdict.
+          One line only: the controls below say what to do, so this doesn't have
+          to. With a dozen hostages, a paragraph per row is a wall. */}
+      {isPending && (
+        <div className="text-text-2">
+          {rejectedSource ? (
+            <>Its dependency was <b className="text-danger">rejected</b> — no outcome will ever exist to judge against.</>
+          ) : gateReady ? (
+            <>The gate finished. Nothing has judged this task against its outcome yet.</>
+          ) : (
+            <>Waiting on the gate — {gateNotReadyReason(sourceTask)}.</>
+          )}
+        </div>
+      )}
       {verdict === "revise" && (
         <div className="space-y-1 mt-1">
           {revision.revised_name !== undefined && (
@@ -831,18 +959,160 @@ function ReevalBand({ t, act, nameFromId }: { t: EnrichedTask; act: (id: string,
           )}
         </div>
       )}
-      <div className="flex items-center gap-2 pt-0.5">
-        <button
-          className={`${subtleBtn} ${isPending ? "opacity-40 cursor-not-allowed" : ""}`}
-          disabled={isPending}
-          title={isPending ? "no verdict yet — dismiss or wait for evaluation to complete" : "apply verdict"}
-          onClick={() => act(t.id, "reeval-apply")}
-        >
-          Apply
-        </button>
-        <button className={subtleBtn} onClick={() => act(t.id, "reeval-dismiss")} title="clear verdict without applying">
+      {/* The primary slot always holds something the operator can actually press.
+          Apply used to sit here permanently disabled while pending, leaving
+          Dismiss — the discard — as the only live control on the row. */}
+      <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+        {!isPending ? (
+          <button className={primarySm} title="apply verdict" onClick={() => act(t.id, "reeval-apply")}>
+            Apply
+          </button>
+        ) : rejectedSource ? (
+          <>
+            <button className={primarySm} onClick={onRewriteDeps} title="Edit this task's dependencies — drop the dead edge or retype it">
+              Rewrite deps
+            </button>
+            <button className={subtleBtn} onClick={onReject} title="This branch died with its dependency">
+              Reject task
+            </button>
+          </>
+        ) : (
+          <button
+            className={`${primarySm} ${gateReady ? "" : "opacity-40 cursor-not-allowed"}`}
+            disabled={!gateReady || !sourceTask}
+            title={
+              gateReady
+                ? `Judge this task (and the rest of the subtree) against ${nameFromId(t.reeval_source)}'s outcome`
+                : `Can't run yet — ${gateNotReadyReason(sourceTask)}`
+            }
+            onClick={() => sourceTask && onReevaluate(sourceTask)}
+          >
+            <RotateCw className="h-3 w-3" /> Re-evaluate {nameFromId(t.reeval_source)}
+          </button>
+        )}
+        <button className={subtleBtn} onClick={() => act(t.id, "reeval-dismiss")} title="clear the flag without changing anything">
           Dismiss
         </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Edit the graph metadata the gate machinery keys on: which dep edges exist,
+ * which of them are gates, and the premise the task rests on. Lives inside the
+ * expanded card so the scannable list is untouched. Order edge = "needs its
+ * artifact"; gate edge = "its outcome decides whether this task should exist".
+ *
+ * Removal matters as much as retyping: when an upstream is rejected, whale tells
+ * the operator to rewrite the dep — and until this could drop an edge, there was
+ * no control in the app that did that.
+ */
+function GatesEditor({
+  deps,
+  initialTypes,
+  initialPremise,
+  refOf,
+  onSave,
+  onClose,
+}: {
+  deps: string[];
+  initialTypes: Record<string, "order" | "gate">;
+  initialPremise: string;
+  /** Task name → short ref. Dep names are full titles, often 100 chars. */
+  refOf: (name: string) => string;
+  onSave: (deps: string[], types: Record<string, "order" | "gate">, premise: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [kept, setKept] = useState<string[]>(deps);
+  const [types, setTypes] = useState<Record<string, "order" | "gate">>(() =>
+    Object.fromEntries(deps.map((d) => [d, initialTypes[d] ?? "order"])) as Record<string, "order" | "gate">,
+  );
+  const [premise, setPremise] = useState(initialPremise);
+  const [saving, setSaving] = useState(false);
+  const anyGate = kept.some((d) => types[d] === "gate");
+  const dropped = deps.filter((d) => !kept.includes(d));
+  const seg = (on: boolean) =>
+    `px-2 py-0.5 text-[11px] rounded-sm border ${on ? "border-warning/50 bg-warning/15 text-warning" : "border-border text-text-3 hover:text-text"}`;
+
+  return (
+    <div className="rounded border border-border bg-surface-2/50 p-3 space-y-2.5 text-xs">
+      <div className="text-text-3">
+        Edge type decides what a finished upstream means for this task.
+        <b className="text-text-2"> order</b> = needs its output.
+        <b className="text-warning"> gate</b> = its outcome decides whether this task should exist — resolving it triggers re-evaluation.
+      </div>
+      <div className="space-y-1.5">
+        {kept.map((d) => (
+          <div key={d} className="flex items-center gap-2">
+            <div className="flex gap-1 shrink-0">
+              <button type="button" className={seg(types[d] !== "gate")} onClick={() => setTypes({ ...types, [d]: "order" })}>order</button>
+              <button type="button" className={seg(types[d] === "gate")} onClick={() => setTypes({ ...types, [d]: "gate" })}>gate</button>
+            </div>
+            <span className="font-mono text-[11px] text-text-2 flex-1 min-w-0 truncate" title={d}>
+              {refOf(d)}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 text-text-3 hover:text-danger"
+              title={`Remove this dependency — "${d}"`}
+              onClick={() => setKept(kept.filter((x) => x !== d))}
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+        {dropped.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1 pt-0.5">
+            {dropped.map((d) => (
+              <button
+                key={d}
+                type="button"
+                className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-danger/10 text-danger line-through hover:no-underline"
+                title={`Undo — restore "${d}"`}
+                onClick={() => setKept(deps.filter((x) => kept.includes(x) || x === d))}
+              >
+                − {refOf(d)}
+              </button>
+            ))}
+            <span className="text-text-3">removed on save — click to undo</span>
+          </div>
+        )}
+        {kept.length === 0 && (
+          <span className="text-text-3">No dependencies — this task will be free to push.</span>
+        )}
+      </div>
+      <div className="space-y-1">
+        <span className="text-text-3">
+          Premise {anyGate ? <b className="text-warning">— required with a gate edge</b> : "(optional without a gate edge)"}
+        </span>
+        <textarea
+          value={premise}
+          onChange={(e) => setPremise(e.target.value)}
+          rows={2}
+          placeholder="one sentence naming the assumption — e.g. assumes GO on the go/no-go memo"
+          className="w-full px-2 py-1.5 bg-surface text-text border border-border-strong rounded font-mono text-[11px] focus:outline-none focus:border-primary"
+        />
+        {anyGate && !premise.trim() && (
+          <span className="text-warning">A gate edge without a premise gives the re-evaluation nothing to test — verdicts will be guesses.</span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <button
+          className={`${subtleBtn} ${saving ? "opacity-50" : ""}`}
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true);
+            try {
+              const keptTypes = Object.fromEntries(kept.map((d) => [d, types[d] ?? "order"])) as Record<string, "order" | "gate">;
+              await onSave(kept, keptTypes, premise);
+              onClose();
+            } finally { setSaving(false); }
+          }}
+        >
+          Save
+        </button>
+        <button className={subtleBtn} onClick={onClose}>Cancel</button>
       </div>
     </div>
   );
@@ -859,6 +1129,14 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   const [expandedCards, toggleCard] = usePersistedSet("whale-proposed-cards-expanded");
   const [collapsedProjects, toggleProject] = usePersistedSet("whale-proposed-projects-collapsed");
   const [collapsedWaves, toggleWave] = usePersistedSet("whale-proposed-waves-collapsed");
+  // id of the card whose gates/premise editor is open (one at a time)
+  const [gatesFor, setGatesFor] = useState<string | null>(null);
+  // gate whose outcome is being reviewed before spending the model call
+  const [gateReview, setGateReview] = useState<{ gate: EnrichedTask; preview: GatePreview } | null>(null);
+  const [gateRunning, setGateRunning] = useState(false);
+  // null = "operator hasn't chosen", which lets the board open on the work queue
+  // without ever fighting a choice they did make.
+  const [lens, setLens] = useState<"needs" | "ready" | "blocked" | "all" | null>(null);
   const { push } = useToast();
   const dlg = useDialog();
 
@@ -911,6 +1189,89 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
     load();
     onChange();
   };
+  // Run the gate's result against its dependent subtree. This is the step that
+  // PRODUCES verdicts — without it a task stamped reeval_status='pending' sits
+  // there forever with nothing to apply. One model call covers the whole subtree
+  // and it never applies anything: every verdict still needs a per-task Apply.
+  //
+  // Step 1 reads the outcome (no model call) and opens GateOutcomeDialog, which
+  // is where the operator actually decides: the text at readable size, where it
+  // came from, who gets judged, and what another gate already judged.
+  const reevaluate = async (gate: EnrichedTask) => {
+    const pre = await withBusy(
+      "Reading the gate outcome from krill",
+      post(`/api/proposed/${gate.id}/reevaluate`, { preview: true }),
+    );
+    if (pre.error) {
+      push({ variant: "danger", title: "Could not read the gate outcome", description: pre.error });
+      return;
+    }
+    setGateReview({
+      gate,
+      preview: {
+        result: pre.result ?? null,
+        resultSource: pre.resultSource ?? null,
+        krillStatus: pre.krillStatus ?? gate.krill_status ?? null,
+        dependents: pre.dependents ?? [],
+        skipped: pre.skipped ?? [],
+      },
+    });
+  };
+
+  // Step 2: the operator confirmed the outcome text (and, when gates collide,
+  // whether to replace the other gate's verdicts).
+  const runReevaluate = async (gate: EnrichedTask, result: string, overwrite: boolean) => {
+    setGateRunning(true);
+    try {
+      const r = await withBusy(
+        "Re-evaluating subtree (real Claude)",
+        post(`/api/proposed/${gate.id}/reevaluate`, { result, overwrite }),
+      );
+      if (r.error) {
+        push({ variant: "danger", title: "Re-evaluation failed", description: r.error });
+        return;
+      }
+      if (r.needsResult) {
+        push({ variant: "warning", title: "No result to evaluate against" });
+        return;
+      }
+      const vs: { verdict: string }[] = r.verdicts ?? [];
+      const tally = vs.reduce<Record<string, number>>((a, v) => ((a[v.verdict] = (a[v.verdict] ?? 0) + 1), a), {});
+      const parts = Object.entries(tally).map(([k, n]) => `${n} ${k}`);
+      const held: { name: string }[] = r.skipped ?? [];
+      if (held.length) parts.push(`${held.length} left to another gate`);
+      push({
+        variant: vs.length ? "success" : "info",
+        title: vs.length ? `${vs.length} verdict${vs.length === 1 ? "" : "s"} ready for review` : "No dependents to evaluate",
+        description: parts.join(" · ") || undefined,
+      });
+      setGateReview(null);
+    } finally {
+      setGateRunning(false);
+      load();
+      onChange();
+    }
+  };
+
+  // Graph metadata editor (edges, which of them are gates, premise). Sends the
+  // FULL deps list and dep_types map; the API validates both and rejects a type
+  // on a non-dependency edge.
+  const saveGates = async (
+    id: string,
+    deps: string[],
+    dep_types: Record<string, "order" | "gate">,
+    premise: string,
+  ) => {
+    const r = await j(`/api/proposed/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deps, dep_types, premise }),
+    });
+    if (r.error) push({ variant: "danger", title: "Could not save gates", description: r.error });
+    else push({ variant: "success", title: "Gates saved" });
+    load();
+  };
+
   const refine = async (id: string) => {
     const input = await dlg.prompt({
       title: "Refine task",
@@ -957,13 +1318,6 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   };
   const rejN = items.filter((p) => p.status === "rejected").length;
   const show = showRej ? items : items.filter((p) => p.status !== "rejected");
-  const grouped = show.reduce<Record<string, EnrichedTask[]>>((a, p) => {
-    (a[p.project_key] ||= []).push(p);
-    return a;
-  }, {});
-  const groupKeys = Object.keys(grouped).sort();
-  const pushable = (list: EnrichedTask[]) =>
-    list.filter((p) => !p.disabled && !hasReeval(p) && ["proposed", "approved", "push_failed"].includes(p.status)).length;
   const dis = "disabled:opacity-40 disabled:cursor-not-allowed";
   // Execution order: a task lands after every dep it has in the set (topo sort).
   const topoSort = (list: EnrichedTask[]) => {
@@ -1034,6 +1388,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   // task name -> its dump (to flag cross-dump deps) and -> its short label.
   const nameToDump = new Map(items.map((t) => [t.name, t.source_entry_id ?? "__none__"]));
   const shortName = (s: string) => (s.length > 22 ? s.slice(0, 21) + "…" : s);
+
   const nameToTask = new Map(items.map((t) => [t.name, t]));
   const idToTask = new Map(items.map((t) => [t.id, t]));
   const nameFromId = (id: string | null): string => {
@@ -1051,6 +1406,10 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
     const id = t.krill_task_id ?? `TEMP-${t.id.slice(0, 4).toUpperCase()}`;
     return { ref: `${id} ${t.label || shortName(name)}`, done: t.krill_status === "DONE" };
   };
+  // The one way a task is named outside its own row: "MV-17 wedge-call", never
+  // the 100-char title. Shared with GatesEditor and GateOutcomeDialog so every
+  // surface refers to the same task the same way.
+  const refOf = (name: string) => depMeta(name).ref;
   const renderRefs = (names: string[]) =>
     names.map((d, i) => {
       const m = depMeta(d);
@@ -1061,10 +1420,16 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
       );
     });
   // Reverse edges: task name -> names of tasks that depend on it (it unblocks).
+  // Rejected tasks are excluded as DEPENDENTS (a dead task is not blocked by
+  // anything, and counting it inflates "blocks N" and the re-evaluate count).
+  // Rejected tasks still appear as upstreams — that dangling edge is the whole
+  // point of reject hygiene. Mirrors collectDescendants in pipeline.ts.
   const dependents = new Map<string, string[]>();
-  for (const t of items)
+  for (const t of items) {
+    if (t.status === "rejected") continue;
     for (const d of JSON.parse(t.deps || "[]") as string[])
       dependents.set(d, [...(dependents.get(d) ?? []), t.name]);
+  }
   // Transitive closure of `dependents`: task name → all names that transitively depend on it.
   const transitiveDependents = new Map<string, Set<string>>();
   for (const t of items) {
@@ -1085,11 +1450,72 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
   // Deps that aren't DONE yet — the things still blocking this task from krill.
   const blockingDeps = (p: EnrichedTask) =>
     (JSON.parse(p.deps || "[]") as string[]).filter((d) => !depMeta(d).done);
-  // Ready for krill = actionable + no pending reeval + every dep DONE.
-  const readyForKrill = (p: EnrichedTask) => actionable(p) && !hasReeval(p) && blockingDeps(p).length === 0;
+  // Gate edges not yet re-evaluated for this task. Computed by the SERVER
+  // (`withGateState` in pipeline.ts) and shipped on every row: the push guard has
+  // exactly one implementation, so the UI can never grey out a different set than
+  // the server refuses.
+  const unresolvedGates = (p: EnrichedTask): string[] => p.gated_by ?? [];
+  // Ready for krill = actionable + no open verdict + no unresolved gate + every dep DONE.
+  const readyForKrill = (p: EnrichedTask) =>
+    actionable(p) && !hasReeval(p) && unresolvedGates(p).length === 0 && blockingDeps(p).length === 0;
+  // What group-push would actually send: the server defers open verdicts and
+  // unresolved gates, so counting them here would promise pushes that don't happen.
+  const pushable = (list: EnrichedTask[]) =>
+    list.filter(
+      (p) =>
+        !p.disabled &&
+        !hasReeval(p) &&
+        unresolvedGates(p).length === 0 &&
+        ["proposed", "approved", "push_failed"].includes(p.status),
+    ).length;
   // Per-project rollup: how many tasks are unblocked and ready to push now.
   const readyCount = (list: EnrichedTask[]) => list.filter(readyForKrill).length;
   const pendingReevalCount = (list: EnrichedTask[]) => list.filter(hasReeval).length;
+
+  // Is this task a gate for anything? (a direct dependent types the edge "gate")
+  const isGateFor = (p: EnrichedTask) =>
+    (dependents.get(p.name) ?? []).some((down) => {
+      const dt = JSON.parse(nameToTask.get(down)?.dep_types || "{}") as Record<string, string>;
+      return dt[p.name] === "gate";
+    });
+  const transitiveCountOf = (p: EnrichedTask) => transitiveDependents.get(p.name)?.size ?? 0;
+
+  // The board's actual work queue: a flag or verdict sitting on this task, or a
+  // finished gate whose subtree nobody has judged yet. Everything else is either
+  // moving on its own or waiting on something that is not you. Without this the
+  // five rows that need a human are indistinguishable from ninety-nine that don't.
+  const needsYou = (p: EnrichedTask) =>
+    hasReeval(p) || (isGateFor(p) && gateHasOutcome(p) && transitiveCountOf(p) > 0);
+  const isBlocked = (p: EnrichedTask) =>
+    actionable(p) && (blockingDeps(p).length > 0 || unresolvedGates(p).length > 0 || hasReeval(p));
+
+  const LENSES = [
+    { id: "needs", label: "Needs you", match: needsYou, empty: "Nothing is waiting on you." },
+    { id: "ready", label: "Ready", match: readyForKrill, empty: "Nothing is unblocked and ready to push." },
+    { id: "blocked", label: "Blocked", match: isBlocked, empty: "Nothing is blocked." },
+    { id: "all", label: "All", match: () => true, empty: "Nothing here." },
+  ] as const;
+  type LensId = (typeof LENSES)[number]["id"];
+  const lensCount = (id: LensId) => show.filter(LENSES.find((l) => l.id === id)!.match).length;
+  // Open on the work queue when there IS one, but never override a choice the
+  // operator made — `lens` stays null until they pick.
+  const activeLens: LensId = lens ?? (show.some(needsYou) ? "needs" : "all");
+  const lensDef = LENSES.find((l) => l.id === activeLens)!;
+  const visible = show.filter(lensDef.match);
+
+  const grouped = visible.reduce<Record<string, EnrichedTask[]>>((a, p) => {
+    (a[p.project_key] ||= []).push(p);
+    return a;
+  }, {});
+  const groupKeys = Object.keys(grouped).sort();
+  // A dump group whose every task is finished in krill is a receipt, not work.
+  // For those the persisted set means "expanded" — so they default closed while
+  // the same toggle keeps working. Everything else defaults open.
+  const groupFinished = (g: { tasks: EnrichedTask[] }) =>
+    g.tasks.length > 0 &&
+    g.tasks.every((t) => t.status === "pushed" && (t.krill_status === "DONE" || t.krill_status === "CANCELED"));
+  const groupOpen = (g: { id: string; tasks: EnrichedTask[] }) =>
+    groupFinished(g) ? collapsedGroups.has(g.id) : !collapsedGroups.has(g.id);
   // Risk → a single signal: colored left border + one dot. Kills the risk pill.
   const riskDot = (t?: string | null) => (
     <Dot tone={t === "high" ? "danger" : t === "low" ? "success" : "orange"} />
@@ -1104,14 +1530,42 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
         <b> bypass</b> (<Dot tone="success" className="inline align-middle" />) or wait (<Dot tone="danger" className="inline align-middle" />/<Dot tone="orange" className="inline align-middle" />). Push a task alone (<b>Approve</b> → <b>Push to krill</b>) or
         <b> Push batch</b> a whole project in dependency order.
       </p>
-      {rejN > 0 && (
-        <p className="text-xs text-text-2 mt-1">
-          {rejN} rejected hidden ·{" "}
-          <button className={ghost} onClick={() => setShowRej((v) => !v)}>{showRej ? "hide" : "show"}</button>
-        </p>
-      )}
+      {/* Lens bar — the board is ~100 tasks and only a handful ever want a human.
+          Counts are always visible so switching is an informed move, not a probe. */}
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        {LENSES.map((l) => {
+          const n = lensCount(l.id);
+          const on = l.id === activeLens;
+          return (
+            <button
+              key={l.id}
+              type="button"
+              onClick={() => setLens(l.id)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border ${
+                on
+                  ? "border-primary/60 bg-primary/10 text-primary"
+                  : "border-border text-text-2 hover:bg-surface-2 hover:text-text"
+              }`}
+            >
+              {l.label}
+              <span className={`text-[11px] ${on ? "" : "text-text-3"}`}>{n}</span>
+            </button>
+          );
+        })}
+        {rejN > 0 && (
+          <span className="text-xs text-text-2 ml-1">
+            {rejN} rejected hidden ·{" "}
+            <button className={ghost} onClick={() => setShowRej((v) => !v)}>{showRej ? "hide" : "show"}</button>
+          </span>
+        )}
+      </div>
       {show.length === 0 ? (
         <p className="text-text-2 mt-4">Nothing to review yet — dump requests and <b>Plan</b> a project in the Inbox tab.</p>
+      ) : visible.length === 0 ? (
+        <p className="text-text-2 mt-4">
+          {lensDef.empty}{" "}
+          <button className={ghost} onClick={() => setLens("all")}>Show all {show.length}</button>
+        </p>
       ) : (
         groupKeys.map((key) => (
           <div key={key} className="mt-4 border border-border rounded-lg overflow-hidden">
@@ -1148,21 +1602,26 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
               </button>
             </div>
             {!collapsedProjects.has(key) && dumpGroups(grouped[key]).map((g) => (
-              <div key={g.id} className={`border-b border-border last:border-b-0 ${!collapsedGroups.has(g.id) ? "bg-surface-2" : ""}`}>
-                <div className={`flex items-center justify-between gap-2 px-3 py-2 border-l-2 border-l-primary/50 ${collapsedGroups.has(g.id) ? "bg-surface" : ""}`}>
+              <div key={g.id} className={`border-b border-border last:border-b-0 ${groupOpen(g) ? "bg-surface-2" : ""}`}>
+                <div className={`flex items-center justify-between gap-2 px-3 py-2 border-l-2 border-l-primary/50 ${!groupOpen(g) ? "bg-surface" : ""}`}>
                   <button
                     type="button"
                     onClick={() => toggleGroup(g.id)}
                     className="flex-1 text-xs font-medium text-text min-w-0 truncate inline-flex items-center gap-1 hover:text-primary"
-                    title={collapsedGroups.has(g.id) ? "Expand" : "Collapse"}
+                    title={groupOpen(g) ? "Collapse" : "Expand"}
                   >
-                    <span className="shrink-0 text-text-3 inline-flex">{collapsedGroups.has(g.id) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
+                    <span className="shrink-0 text-text-3 inline-flex">{groupOpen(g) ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</span>
                     {g.id === "__none__" ? (
                       "Ungrouped"
                     ) : (
-                      <span className="text-xs">{(g.text ?? "dump").slice(0, 90)}</span>
+                      <span className="text-xs" title={g.text ?? undefined}>{dumpTitle(g.text)}</span>
                     )}
                     <span className="text-text-3">· {g.tasks.length} task{g.tasks.length === 1 ? "" : "s"}</span>
+                    {groupFinished(g) && (
+                      <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded-full bg-success/15 text-success" title="Every task in this dump finished in krill — collapsed by default">
+                        all done
+                      </span>
+                    )}
                   </button>
                   {g.id !== "__none__" && (
                     <div className="flex items-center gap-1 shrink-0">
@@ -1186,7 +1645,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                     </div>
                   )}
                 </div>
-                {!collapsedGroups.has(g.id) && (() => {
+                {groupOpen(g) && (() => {
                   const reevalTasks = g.tasks.filter(hasReeval);
                   const restTasks = g.tasks.filter((t) => !hasReeval(t));
                   const taskRow = (p: EnrichedTask) => {
@@ -1197,21 +1656,25 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                     const blocking = blockingDeps(p);
                     const depsCleared = readyForKrill(p);
                     const blockedByDeps = actionable(p) && blocking.length > 0;
-                    const awaitingReeval = hasReeval(p);
-                    const reevalTitle = awaitingReeval ? "awaiting re-evaluation — resolve the verdict first" : undefined;
+                    const openGates = unresolvedGates(p);
+                    // Blocked from krill either by an open verdict or by a gate
+                    // whose result has not been re-evaluated for this task yet.
+                    const awaitingReeval = hasReeval(p) || openGates.length > 0;
+                    const reevalTitle = hasReeval(p)
+                      ? "awaiting re-evaluation — resolve the verdict first"
+                      : openGates.length > 0
+                        ? `gated by ${openGates.join(", ")} — re-evaluate that gate before pushing`
+                        : undefined;
                     const depBlockTitle = blockedByDeps ? `Blocked — waiting on: ${blocking.join(", ")}` : undefined;
                     const blocks = dependents.get(p.name) ?? [];
                     const crossDep = deps.some((d) => nameToDump.get(d) !== (p.source_entry_id ?? "__none__"));
                     const refines = JSON.parse(p.refine_log || "[]").length;
-                    const isGateFor = blocks.some((down) => {
-                      const downTask = nameToTask.get(down);
-                      if (!downTask) return false;
-                      const dt = JSON.parse(downTask.dep_types || "{}") as Record<string, "order" | "gate">;
-                      return dt[p.name] === "gate";
-                    });
-                    const transitiveCount = transitiveDependents.get(p.name)?.size ?? 0;
+                    const gatesSomething = isGateFor(p);
+                    const transitiveCount = transitiveCountOf(p);
+                    // Same rule the dependents' bands use — see gateHasOutcome.
+                    const gateResolved = gateHasOutcome(p);
                     return (
-                      <li key={p.id} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : "bg-surface"}`}>
+                      <li key={p.id} id={`task-${p.id}`} className={`border-l-2 ${riskBorder(p.risk_tier)} ${p.disabled ? "opacity-50" : ""} ${depsCleared ? "bg-success/5" : "bg-surface"}`}>
                         {/* collapsed header — one scannable row: ref · label · name · risk · status · primary action */}
                         <div className="flex items-center gap-2 px-3 py-2 pl-7 hover:bg-surface-2/40 transition-colors">
                           <button
@@ -1230,12 +1693,8 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                             {p.label ? (
                               <span className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary">{p.label}</span>
                             ) : null}
-                            {p.owner_persona ? (
-                              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-info/10 text-info" title={`proposed by ${p.owner_persona}${p.owner_area ? ` (${p.owner_area})` : ""}`}>{p.owner_persona}</span>
-                            ) : null}
                             <span className="text-sm font-medium break-words">{p.name}</span>
                           </button>
-                          <HashId id={p.id} />
                           <span className="shrink-0 inline-flex items-center gap-1 text-xs text-text-2 whitespace-nowrap" title={`${p.risk_tier || "?"} risk`}>
                             {riskDot(p.risk_tier)} {p.risk_tier || "?"}
                           </span>
@@ -1255,7 +1714,7 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                               <Lock className="h-3 w-3" /> gated by {renderRefs(gateDeps)}
                             </span>
                           )}
-                          {isGateFor && transitiveCount > 0 && (
+                          {gatesSomething && transitiveCount > 0 && (
                             <span
                               className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-danger/20 text-danger font-medium"
                               title={[...(transitiveDependents.get(p.name) ?? [])].join(", ")}
@@ -1283,6 +1742,25 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                           ) : p.status === "push_failed" ? (
                             <button className={`${pushBtn} ${dis}`} disabled={krillDown || blockedByDeps || awaitingReeval} title={reevalTitle ?? (krillDown ? "krill is down — can't push" : depBlockTitle)} onClick={() => setReview({ tasks: [p], key: p.project_key, kind: "single" })}>Retry</button>
                           ) : null}
+                          {/* Gate rows own the one control that starts an evaluation. A pushed
+                              gate has no other primary action, so this fills that slot rather
+                              than adding a competing button. */}
+                          {gatesSomething && transitiveCount > 0 && (
+                            <button
+                              className={`${pushBtn} ${gateResolved ? "" : dis}`}
+                              disabled={!gateResolved}
+                              title={
+                                gateResolved
+                                  ? `Gate finished (${p.krill_status}) — evaluate its ${transitiveCount} dependent${transitiveCount === 1 ? "" : "s"} against the outcome`
+                                  : p.status === "pushed"
+                                    ? `Gate is still running in krill (${p.krill_status ?? "no status"}) — re-evaluate once it reaches DONE or CANCELED`
+                                    : "Gate hasn't run yet — push it to krill and let it finish first"
+                              }
+                              onClick={() => reevaluate(p)}
+                            >
+                              <RotateCw className="h-3.5 w-3.5" /> Re-evaluate
+                            </button>
+                          )}
                         </div>
                         {/* impact hypothesis — one muted line; blank = housekeeping, show nothing */}
                         {p.expected_impact?.trim() ? (
@@ -1290,14 +1768,38 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                             ◆ {p.expected_impact}
                           </div>
                         ) : null}
-                        {/* re-eval verdict band */}
-                        {awaitingReeval && <ReevalBand t={p} act={act} nameFromId={nameFromId} />}
+                        {/* re-eval verdict band — only when there IS a flag. An
+                            unresolved gate with no flag is already stated by the
+                            "gated by" chip and the disabled primary. */}
+                        {hasReeval(p) && (
+                          <ReevalBand
+                            t={p}
+                            act={act}
+                            nameFromId={nameFromId}
+                            sourceTask={p.reeval_source ? idToTask.get(p.reeval_source) : undefined}
+                            onReevaluate={reevaluate}
+                            onRewriteDeps={() => {
+                              if (!expandedCards.has(p.id)) toggleCard(p.id);
+                              setGatesFor(p.id);
+                            }}
+                            onReject={() => act(p.id, "reject")}
+                          />
+                        )}
                         {/* expanded detail — description, meta, rationale, secondary actions */}
                         {open && (
                           <div className="p-4 pt-1 pl-8 space-y-4">
                             {p.description && <p className="border border-dashed rounded-md p-3 text-xs text-text-2">{p.description}</p>}
                             {p.premise && <p className="text-xs italic text-text-2">Assumes: {p.premise}</p>}
+                            {/* Identity detail lives here, not on the collapsed row:
+                                the row already carries a ref, and a second id plus
+                                a persona chip is noise on a list this long. */}
                             <div className="text-xs text-text-2 flex gap-2 flex-wrap items-center">
+                              {p.owner_persona ? (
+                                <span className="px-2 rounded-full bg-info/15 text-info" title={p.owner_area ? `${p.owner_persona} (${p.owner_area})` : undefined}>
+                                  proposed by {p.owner_persona}
+                                </span>
+                              ) : null}
+                              <HashId id={p.id} />
                               <span className="px-2 rounded-full bg-border">{p.priority}</span>
                               <span className="px-2 rounded-full bg-border">{p.mode}</span>
                               <span className="px-2 rounded-full bg-border">{p.bypass ? "bypass review" : "needs review"}</span>
@@ -1334,10 +1836,29 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
                                   <button className={subtleBtn} onClick={() => togglePark(p.id, true)} title="Park — can't handle now; dim it and exclude from pushes"><Pause className="h-3 w-3" /> Park</button>
                                 </>
                               )}
+                              {deps.length > 0 && p.status !== "pushed" && p.status !== "rejected" && (
+                                <button
+                                  className={subtleBtn}
+                                  onClick={() => setGatesFor(gatesFor === p.id ? null : p.id)}
+                                  title="Mark which dependencies are gates, and state the premise this task rests on"
+                                >
+                                  <Lock className="h-3 w-3" /> Gates{gateDeps.length > 0 ? ` (${gateDeps.length})` : ""}
+                                </button>
+                              )}
                               <button className={dangerSm} onClick={() => del(p.id)}>
                                 <Trash2 className="h-3.5 w-3.5" /> delete
                               </button>
                             </div>
+                            {gatesFor === p.id && (
+                              <GatesEditor
+                                deps={deps}
+                                initialTypes={depTypes}
+                                initialPremise={p.premise ?? ""}
+                                refOf={refOf}
+                                onSave={(nextDeps, types, premise) => saveGates(p.id, nextDeps, types, premise)}
+                                onClose={() => setGatesFor(null)}
+                              />
+                            )}
                           </div>
                         )}
                       </li>
@@ -1405,6 +1926,19 @@ function ProposedTab({ withBusy, onChange, active, rev, krillDown }: { withBusy:
           busy={sending}
           onCancel={() => setReview(null)}
           onConfirm={sendReview}
+        />
+      )}
+      {gateReview && (
+        <GateOutcomeDialog
+          open
+          gateName={gateReview.gate.name}
+          gateRef={gateReview.gate.krill_task_id ?? `TEMP-${gateReview.gate.id.slice(0, 4).toUpperCase()}`}
+          krillTaskId={gateReview.gate.krill_task_id}
+          preview={gateReview.preview}
+          refOf={refOf}
+          busy={gateRunning}
+          onCancel={() => setGateReview(null)}
+          onConfirm={(result, overwrite) => runReevaluate(gateReview.gate, result, overwrite)}
         />
       )}
     </section>

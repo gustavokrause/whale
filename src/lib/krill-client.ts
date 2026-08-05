@@ -209,13 +209,92 @@ export async function getTask(id: string): Promise<{ status?: string } | null> {
  *  null when krill exposes no artifact field or is unreachable — the caller
  *  falls back to an operator-pasted result on the re-eval request (an unusable
  *  stub is worse than an explicit manual paste). */
-export async function getTaskResult(id: string): Promise<string | null> {
+/**
+ * Best-effort read of a finished krill task's OUTCOME, for gate re-evaluation.
+ *
+ * krill has no single "result" column, so this assembles one from what a
+ * finished task actually carries, richest-signal-first:
+ *   1. result-ish fields, if a future krill ever adds one
+ *   2. `diff_text` — for a non-dev task the deliverable IS the doc, and the
+ *      diff carries its full text. This is the real artifact in practice.
+ *   3. the task's own comments — stage summaries and AI-review verdicts, which
+ *      state the conclusion even when no file changed.
+ * Falls back to metadata (name/acceptance/impact) ONLY alongside one of the
+ * above; metadata alone is not an outcome and returns null so the caller asks
+ * the operator to paste the result instead of evaluating against a stub.
+ *
+ * `source` travels with the text because the operator has to judge whether this
+ * outcome is the real one: "assembled from stage notes" and "krill's own result
+ * field" carry very different confidence, and a diff from a task that finished
+ * months before its findings landed is exactly the stale case worth catching.
+ */
+export type TaskOutcome = {
+  text: string;
+  /** Where the text came from, richest-signal-first. */
+  source: "result" | "diff" | "notes" | "diff+notes";
+  krill_status?: string | null;
+  krill_name?: string | null;
+};
+
+export async function getTaskOutcome(id: string): Promise<TaskOutcome | null> {
   try {
     const r = await call("GET", `/api/tasks/${id}`);
     const t = r?.task || r || null;
-    const candidates = [t?.result, t?.artifact, t?.deliverable, t?.review_notes];
-    for (const c of candidates) if (typeof c === "string" && c.trim()) return c;
+    if (!t) return null;
+    const meta = {
+      krill_status: typeof t.status === "string" ? t.status : null,
+      krill_name: typeof t.name === "string" ? t.name : null,
+    };
+
+    for (const c of [t.result, t.artifact, t.deliverable, t.review_notes]) {
+      if (typeof c === "string" && c.trim()) return { text: c, source: "result", ...meta };
+    }
+
+    const parts: string[] = [];
+    const hasDiff = typeof t.diff_text === "string" && t.diff_text.trim();
+    if (hasDiff) parts.push(`## Deliverable (diff)\n${(t.diff_text as string).trim()}`);
+
+    let hasNotes = false;
+    try {
+      const c = await call("GET", `/api/tasks/${id}/comments`);
+      const list: unknown[] = Array.isArray(c) ? c : c?.comments || [];
+      const lines = list
+        .map((x) => x as Record<string, unknown>)
+        .filter((x) => typeof x.text === "string" && (x.text as string).trim())
+        .map((x) => `- [${String(x.stage ?? "?")}] ${String(x.text).trim()}`);
+      if (lines.length) {
+        parts.push(`## Stage notes\n${lines.join("\n")}`);
+        hasNotes = true;
+      }
+    } catch {
+      // comments are a bonus signal; absence must not sink the whole read
+    }
+
+    if (parts.length === 0) return null;
+
+    const head = [
+      `# ${String(t.name ?? id)} (${String(t.status ?? "?")})`,
+      typeof t.acceptance === "string" && t.acceptance.trim()
+        ? `Acceptance: ${t.acceptance.trim()}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return {
+      text: [head, ...parts].join("\n\n"),
+      source: hasDiff && hasNotes ? "diff+notes" : hasDiff ? "diff" : "notes",
+      ...meta,
+    };
+  } catch {
     return null;
+  }
+}
+
+/** Text-only view of {@link getTaskOutcome}, for callers that don't show provenance. */
+export async function getTaskResult(id: string): Promise<string | null> {
+  try {
+    return (await getTaskOutcome(id))?.text ?? null;
   } catch {
     return null;
   }

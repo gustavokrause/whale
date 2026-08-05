@@ -17,7 +17,15 @@ export async function GET() {
     runner: config.runner,
     autonomy: { bypass: config.autonomy.bypass, autoPush: config.autonomy.autoPush },
     inbox: { total: listEntries(1000).length, raw: rawEntries().length },
-    proposed: { total: proposed.length, byStatus },
+    // flagged = tasks carrying a re-eval flag or an unreviewed verdict: the
+    // durable "a human must look at this" set, provable from the DB alone. Gates
+    // that are merely READY to run need krill's live status, so they are counted
+    // by the Proposed tab's lens rather than on every status poll.
+    proposed: {
+      total: proposed.length,
+      flagged: proposed.filter((p) => p.reeval_status != null && p.status !== "rejected").length,
+      byStatus,
+    },
     krill: { up: await ping(), url: config.krill.baseUrl },
   });
 }

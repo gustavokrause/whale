@@ -36,7 +36,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // id=gate for reevaluate; id=dependent for reeval-apply / reeval-dismiss
     if (action === "reevaluate") {
       const b = await body(req);
-      return json(await reevaluateSubtree(team, id, { result: b.result ? String(b.result) : undefined }));
+      return json(
+        await reevaluateSubtree(team, id, {
+          result: b.result ? String(b.result) : undefined,
+          preview: !!b.preview,
+          // opt-in, per run: re-judge dependents already holding another gate's
+          // unreviewed verdict instead of leaving them to that gate.
+          overwrite: !!b.overwrite,
+        }),
+      );
     }
     if (action === "reeval-apply")   return json({ task: reevalApply(id) });
     if (action === "reeval-dismiss") return json({ task: reevalDismiss(id) });

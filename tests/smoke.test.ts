@@ -10,13 +10,13 @@ import { db, sql as sqlite } from "../src/db/client";
 import { inboxEntries, proposedTasks, config as configTable } from "../src/db/schema";
 import {
   addEntry, listEntries, rawEntries, markEntries,
-  addProposed, listProposed, updateProposed, getProposed,
+  addProposed, listProposed, updateProposed, getProposed, deleteProposed,
   readConfig, writeConfig, pendingRequests,
   addBlocker, listBlockers, resolveBlocker,
 } from "../src/db/queries";
 import { blockers } from "../src/db/schema";
 import { triage, flowPreview, plan, canonicalizeProjectDeps } from "../src/lib/stages";
-import { push, pushBatch, refine, enrichPushed, reject, reevaluateSubtree, reevalApply } from "../src/lib/pipeline";
+import { push, pushBatch, refine, enrichPushed, reject, reevaluateSubtree, reevalApply, reevalDismiss, unresolvedGates, withGateState } from "../src/lib/pipeline";
 import { classifyBlock } from "../src/lib/runner";
 
 function resetDb() {
@@ -612,4 +612,431 @@ test("WH-19 reevaluateSubtree: verdicts kill/keep/revise; reevalApply only chang
   assert.equal(getProposed(d3.id)!.reeval_status, null, "d3 reeval cleared after apply");
 
   resetDb();
+});
+
+// -- Gate flow: the operator path (trigger -> verdict -> apply) --------------
+// These cover the seam WH-16..WH-23 left open: verdicts existed but nothing
+// could produce them from the app, and the two fields the machinery keys on
+// (dep_types, premise) were unwritable outside a direct DB write.
+
+test("PATCH /api/proposed/:id accepts premise + dep_types, and rejects bogus edges", async () => {
+  resetDb();
+  const { PATCH } = await import("../src/app/api/proposed/[id]/route");
+  const patch = (id: string, body: unknown) =>
+    PATCH(new Request(`http://x/api/proposed/${id}`, { method: "PATCH", body: JSON.stringify(body) }), {
+      params: Promise.resolve({ id }),
+    });
+
+  addProposed({ project_key: "wh", name: "GATE", label: "gate" });
+  addProposed({ project_key: "wh", name: "ORD", label: "ord" });
+  const child = addProposed({ project_key: "wh", name: "CHILD", deps: ["GATE", "ORD"] });
+
+  // gate tag + premise persist; "order" is stored as an absent key
+  let res = await patch(child.id, {
+    dep_types: { GATE: "gate", ORD: "order" },
+    premise: "  assumes GO on GATE  ",
+  });
+  assert.equal(res.status, 200);
+  let row = getProposed(child.id)!;
+  assert.deepEqual(JSON.parse(row.dep_types), { GATE: "gate" }, "only gate edges stored");
+  assert.equal(row.premise, "assumes GO on GATE", "premise trimmed");
+
+  // a type on a non-dependency edge is refused, and nothing is written
+  res = await patch(child.id, { dep_types: { NOPE: "gate" } });
+  assert.equal(res.status, 400, "unknown edge rejected");
+  assert.deepEqual(JSON.parse(getProposed(child.id)!.dep_types), { GATE: "gate" }, "prior state intact");
+
+  // an invalid edge type is refused
+  res = await patch(child.id, { dep_types: { GATE: "sometimes" } });
+  assert.equal(res.status, 400, "invalid dep_type value rejected");
+
+  // full-replacement semantics: submitting all-order clears the gate
+  res = await patch(child.id, { dep_types: { GATE: "order", ORD: "order" } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(getProposed(child.id)!.dep_types), {}, "gate cleared by full replace");
+
+  // premise survives a patch that does not mention it
+  await patch(child.id, { priority: "P1" });
+  row = getProposed(child.id)!;
+  assert.equal(row.premise, "assumes GO on GATE", "premise untouched by unrelated patch");
+  assert.equal(row.priority, "P1");
+  resetDb();
+});
+
+test("PATCH /api/proposed/:id removes a dep edge — the control the rejected-dep flag points at", async () => {
+  resetDb();
+  const { PATCH } = await import("../src/app/api/proposed/[id]/route");
+  const patch = (id: string, body: unknown) =>
+    PATCH(new Request(`http://x/api/proposed/${id}`, { method: "PATCH", body: JSON.stringify(body) }), {
+      params: Promise.resolve({ id }),
+    });
+
+  addProposed({ project_key: "wh", name: "GATE", label: "gate" });
+  addProposed({ project_key: "wh", name: "ORD", label: "ord" });
+  addProposed({ project_key: "other", name: "FOREIGN" });
+  const child = addProposed({
+    project_key: "wh", name: "CHILD", deps: ["GATE", "ORD"], dep_types: { GATE: "gate" },
+  });
+
+  // dropping an edge drops its type with it — a type on a non-existent edge is
+  // invisible in the UI and silently wrong at push time
+  let res = await patch(child.id, { deps: ["ORD"] });
+  assert.equal(res.status, 200);
+  let row = getProposed(child.id)!;
+  assert.deepEqual(JSON.parse(row.deps), ["ORD"], "edge removed");
+  assert.deepEqual(JSON.parse(row.dep_types), {}, "the gate type went with it");
+
+  // deps + dep_types in one PATCH: the type is validated against the INCOMING
+  // edges, not the stored ones (the editor always sends both)
+  res = await patch(child.id, { deps: ["GATE", "ORD"], dep_types: { GATE: "gate", ORD: "order" } });
+  assert.equal(res.status, 200);
+  row = getProposed(child.id)!;
+  assert.deepEqual(JSON.parse(row.deps).sort(), ["GATE", "ORD"]);
+  assert.deepEqual(JSON.parse(row.dep_types), { GATE: "gate" }, "re-added edge can be re-typed in the same call");
+
+  // guards
+  assert.equal((await patch(child.id, { deps: ["NOPE"] })).status, 400, "unknown task rejected");
+  assert.equal((await patch(child.id, { deps: ["FOREIGN"] })).status, 400, "cross-project dep rejected");
+  assert.equal((await patch(child.id, { deps: ["CHILD"] })).status, 400, "self-dep rejected");
+  assert.equal((await patch(child.id, { deps: "GATE" })).status, 400, "deps must be an array");
+  assert.deepEqual(JSON.parse(getProposed(child.id)!.deps).sort(), ["GATE", "ORD"], "no partial write on a rejected patch");
+
+  // a dangling edge (upstream deleted) is exactly what the operator opens the
+  // editor to remove — it must survive being resubmitted, not 400
+  const ghost = addProposed({ project_key: "wh", name: "GHOST" });
+  await patch(child.id, { deps: ["GATE", "ORD", "GHOST"] });
+  deleteProposed(ghost.id);
+  res = await patch(child.id, { deps: ["GATE", "GHOST"] });
+  assert.equal(res.status, 200, "dangling edge can be resubmitted");
+  res = await patch(child.id, { deps: ["GATE"] });
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(getProposed(child.id)!.deps), ["GATE"], "and removed");
+  resetDb();
+});
+
+test("krill.getTaskResult builds an outcome from diff_text + comments, null when neither exists", async () => {
+  const orig = globalThis.fetch;
+  const reply = (task: Record<string, unknown>, comments: unknown[]) => {
+    globalThis.fetch = (async (url: unknown) => {
+      const u = String(url);
+      const data = u.includes("/comments") ? { comments } : { task };
+      return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+  };
+  const krill = await import("../src/lib/krill-client");
+  try {
+    // diff + comments both fold into the result
+    reply(
+      { name: "MV-17 memo", status: "DONE", acceptance: "memo exists", diff_text: "+ NO-GO recommended" },
+      [{ stage: "AI-REVIEW", text: "approve: gates stated" }],
+    );
+    const full = await krill.getTaskResult("MV-17");
+    assert.ok(full, "result assembled");
+    assert.match(full!, /MV-17 memo \(DONE\)/, "header names the task + status");
+    assert.match(full!, /NO-GO recommended/, "diff text included");
+    assert.match(full!, /\[AI-REVIEW\] approve/, "stage notes included");
+
+    // comments alone are still an outcome (non-dev tasks that changed no files)
+    reply({ name: "T", status: "DONE" }, [{ stage: "IMPLEMENTING", text: "survey returned N=12" }]);
+    const notesOnly = await krill.getTaskResult("T");
+    assert.match(notesOnly!, /N=12/);
+
+    // metadata with no diff and no comments is NOT an outcome -> operator pastes
+    reply({ name: "T", status: "DONE", acceptance: "something" }, []);
+    assert.equal(await krill.getTaskResult("T"), null, "no fabricated result");
+
+    // provenance travels with the text: "krill's own result field" and "we glued
+    // this together from stage notes" are very different levels of trust, and the
+    // operator decides whether to replace the text based on which one it is
+    reply({ name: "T", status: "DONE", diff_text: "+ x" }, [{ stage: "AI-REVIEW", text: "ok" }]);
+    assert.equal((await krill.getTaskOutcome("T"))?.source, "diff+notes");
+    reply({ name: "T", status: "DONE", diff_text: "+ x" }, []);
+    assert.equal((await krill.getTaskOutcome("T"))?.source, "diff");
+    reply({ name: "T", status: "DONE" }, [{ stage: "IMPLEMENTING", text: "N=12" }]);
+    assert.equal((await krill.getTaskOutcome("T"))?.source, "notes");
+    reply({ name: "T", status: "CANCELED", result: "called off" }, []);
+    const own = await krill.getTaskOutcome("T");
+    assert.equal(own?.source, "result");
+    assert.equal(own?.krill_status, "CANCELED", "krill status rides along for the dialog header");
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("reevaluateSubtree reports needsResult when krill has no outcome, and accepts a pasted one", async () => {
+  resetDb();
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async (url: unknown) => {
+    const u = String(url);
+    const data = u.includes("/comments") ? { comments: [] } : { task: { name: "G", status: "DONE" } };
+    return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const gate = addProposed({ project_key: "wh", name: "G", label: "g" });
+    updateProposed(gate.id, { status: "pushed", krill_task_id: "WH-1" });
+    addProposed({
+      project_key: "wh", name: "D", deps: ["G"],
+      dep_types: { G: "gate" }, premise: "assumes GO on G",
+    });
+
+    const blank = await reevaluateSubtree(stubTeam as never, gate.id);
+    assert.equal(blank.ok, false, "no outcome -> not ok");
+    assert.equal(blank.needsResult, true, "operator is asked for the result");
+    assert.equal(getProposed(gate.id)!.reeval_status, null, "nothing stamped on a failed read");
+
+    const pasted = await reevaluateSubtree(stubTeam as never, gate.id, { result: "CONTRADICTED: no-go, premise dead" });
+    assert.equal(pasted.ok, true, "pasted result evaluates");
+    assert.ok((pasted.verdicts ?? []).length > 0, "verdicts produced for the dependent");
+  } finally {
+    globalThis.fetch = orig;
+    resetDb();
+  }
+});
+
+test("resolving a gate verdict is durable: no re-stamp loop, and the task becomes pushable", async () => {
+  resetDb();
+  const k = mockKrill();
+  try {
+    // two gates over one dependent — the shape that a single-slot marker breaks
+    const g1 = addProposed({ project_key: "demo-app", name: "G1", label: "g1" });
+    const g2 = addProposed({ project_key: "demo-app", name: "G2", label: "g2" });
+    updateProposed(g1.id, { status: "pushed", krill_task_id: "K1" });
+    updateProposed(g2.id, { status: "pushed", krill_task_id: "K2" });
+    const dep = addProposed({
+      project_key: "demo-app", name: "D", deps: ["G1", "G2"],
+      dep_types: { G1: "gate", G2: "gate" }, premise: "assumes GO on both",
+    });
+    k.setTasks([{ id: "K1", status: "DONE" }, { id: "K2", status: "RUNNING" }]);
+
+    // G1 finished -> dependent flagged pending by the poll
+    await enrichPushed([getProposed(g1.id)!, getProposed(g2.id)!]);
+    assert.equal(getProposed(dep.id)!.reeval_status, "pending", "flagged when G1 lands");
+    assert.equal(getProposed(dep.id)!.reeval_source, g1.id);
+
+    // operator resolves it (keep) -> verdict cleared, G1 recorded as handled
+    updateProposed(dep.id, { reeval_status: "keep" , reeval_source: g1.id });
+    reevalApply(dep.id);
+    let after = getProposed(dep.id)!;
+    assert.equal(after.reeval_status, null, "verdict cleared on apply");
+    assert.deepEqual(JSON.parse(after.reeval_resolved), [g1.id], "G1 recorded as resolved");
+
+    // the poll runs again with G1 still DONE — it must NOT re-raise the flag
+    await enrichPushed([getProposed(g1.id)!, getProposed(g2.id)!]);
+    assert.equal(getProposed(dep.id)!.reeval_status, null, "no re-stamp loop for a resolved gate");
+
+    // still not pushable: G2 is a gate that has not resolved yet
+    let r = await push(dep.id, { confirm: true });
+    assert.equal(r.pushed, false, "held while G2 unresolved");
+    assert.deepEqual(r.gatedBy, ["G2"], "only the unresolved gate is named");
+
+    // G2 finishes -> flagged again, for G2 this time
+    k.setTasks([{ id: "K1", status: "DONE" }, { id: "K2", status: "DONE" }]);
+    await enrichPushed([getProposed(g1.id)!, getProposed(g2.id)!]);
+    after = getProposed(dep.id)!;
+    assert.equal(after.reeval_status, "pending", "second gate raises its own flag");
+    assert.equal(after.reeval_source, g2.id);
+
+    // dismissing also counts as resolved -> now nothing gates it
+    reevalDismiss(dep.id);
+    after = getProposed(dep.id)!;
+    assert.deepEqual(JSON.parse(after.reeval_resolved).sort(), [g1.id, g2.id].sort(), "both gates recorded");
+    await enrichPushed([getProposed(g1.id)!, getProposed(g2.id)!]);
+    assert.equal(getProposed(dep.id)!.reeval_status, null, "stays clear after both resolved");
+
+    r = await push(dep.id, { confirm: true });
+    assert.notEqual(r.deferred, true, "pushes once every gate is resolved");
+  } finally {
+    k.restore();
+    resetDb();
+  }
+});
+
+test("gate guard fails open when the upstream proposal is gone", async () => {
+  resetDb();
+  const k = mockKrill();
+  try {
+    // A live gate blocks normally...
+    const gate = addProposed({ project_key: "demo-app", name: "G", label: "g" });
+    updateProposed(gate.id, { status: "pushed", krill_task_id: "K1" });
+    k.setTasks([{ id: "K1", status: "DONE" }]);
+    const dep = addProposed({
+      project_key: "demo-app", name: "D", deps: ["G"],
+      dep_types: { G: "gate" }, premise: "assumes GO on G",
+    });
+    assert.deepEqual(unresolvedGates(getProposed(dep.id)!), ["G"], "live gate blocks");
+
+    // ...but a gate edge naming a proposal that does not exist must NOT. There is
+    // no row to run Re-evaluate on and no verdict band to dismiss, so failing
+    // closed would strand the dependent with no in-app way out. This is the state
+    // left by deleting an upstream, and by an edge naming something never
+    // distilled. Ordinary dep ordering still refuses an unsatisfied name.
+    const orphan = addProposed({
+      project_key: "demo-app", name: "O", deps: ["GHOST"],
+      dep_types: { GHOST: "gate" }, premise: "assumes GO on GHOST",
+    });
+    assert.deepEqual(unresolvedGates(getProposed(orphan.id)!), [], "absent upstream gates nothing");
+
+    // and the same once a real upstream is deleted mid-flight
+    deleteProposed(gate.id);
+    assert.deepEqual(unresolvedGates(getProposed(dep.id)!), [], "deleted upstream gates nothing");
+    const r = await push(dep.id, { confirm: true });
+    assert.notEqual(r.deferred, true, "not deferred by a gate that no longer exists");
+  } finally {
+    k.restore();
+    resetDb();
+  }
+});
+
+test("withGateState ships exactly the gates push refuses on (UI cannot drift from the guard)", async () => {
+  resetDb();
+  const k = mockKrill();
+  try {
+    const gate = addProposed({ project_key: "demo-app", name: "G", label: "g" });
+    updateProposed(gate.id, { status: "pushed", krill_task_id: "K1" });
+    k.setTasks([{ id: "K1", status: "DONE" }]);
+    const dep = addProposed({
+      project_key: "demo-app", name: "D", deps: ["G"],
+      dep_types: { G: "gate" }, premise: "assumes GO on G",
+    });
+    const free = addProposed({ project_key: "demo-app", name: "F" });
+
+    const rowOf = (id: string) => withGateState(listProposed()).find((p) => p.id === id)!;
+    assert.deepEqual(rowOf(dep.id).gated_by, ["G"], "gated row carries the reason");
+    assert.deepEqual(rowOf(free.id).gated_by, [], "ungated row carries an empty list, never undefined");
+
+    // what the UI greys out === the names the server refuses on
+    const held = await push(dep.id, { confirm: true });
+    assert.equal(held.deferred, true, "server defers it");
+    assert.deepEqual(held.gatedBy, rowOf(dep.id).gated_by, "same names on both sides");
+
+    // A caller's stale copy must not leak through: withGateState re-reads the row,
+    // so a pre-stamp copy still reports the gate that enrichPushed just raised.
+    await enrichPushed([getProposed(gate.id)!]);
+    const staleCopy = { ...dep, reeval_status: null, reeval_resolved: "[]" };
+    assert.deepEqual(withGateState([staleCopy])[0].gated_by, ["G"], "checked against the live row");
+
+    reevalDismiss(dep.id);
+    assert.deepEqual(rowOf(dep.id).gated_by, [], "clears once resolved");
+    const sent = await push(dep.id, { confirm: true });
+    assert.notEqual(sent.deferred, true, "server agrees");
+  } finally {
+    k.restore();
+    resetDb();
+  }
+});
+
+test("reevaluate preview returns krill's outcome + dependent list without evaluating", async () => {
+  resetDb();
+  const orig = globalThis.fetch;
+  // Every outbound call the preview makes, so "it only reads krill" is asserted
+  // rather than assumed. The evaluation itself runs through the stage stub under
+  // test config, so it makes no request of its own — the observable proof that
+  // preview skipped it is that it produced no verdicts and stamped no rows.
+  const urls: string[] = [];
+  globalThis.fetch = (async (url: unknown) => {
+    const u = String(url);
+    urls.push(u);
+    if (u.includes("/comments")) return new Response(JSON.stringify({ comments: [] }), { status: 200 });
+    return new Response(
+      JSON.stringify({ task: { name: "G", status: "DONE", diff_text: "+ stale scaffold, no findings yet" } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+  try {
+    const gate = addProposed({ project_key: "demo-app", name: "G", label: "g" });
+    updateProposed(gate.id, { status: "pushed", krill_task_id: "K1" });
+    addProposed({
+      project_key: "demo-app", name: "D1", deps: ["G"],
+      dep_types: { G: "gate" }, premise: "assumes GO on G",
+    });
+    addProposed({ project_key: "demo-app", name: "D2", deps: ["D1"], premise: "needs D1" });
+
+    const pre = await reevaluateSubtree(stubTeam as never, gate.id, { preview: true });
+    assert.equal(pre.preview, true);
+    assert.match(pre.result!, /stale scaffold/, "shows the operator what krill actually holds");
+    assert.deepEqual(pre.dependents!.sort(), ["D1", "D2"], "whole subtree listed, not just direct deps");
+    assert.equal(pre.resultSource, "diff", "dialog can say where the text came from");
+    assert.equal(pre.krillStatus, "DONE");
+    assert.deepEqual(pre.skipped, [], "nothing held by another gate");
+
+    // preview evaluated nothing: no verdicts, no rows stamped, and the only
+    // outbound traffic was the krill result read
+    assert.equal(pre.verdicts, undefined, "preview returns no verdicts");
+    for (const n of ["D1", "D2"]) {
+      const t = listProposed().find((x) => x.name === n)!;
+      assert.equal(t.reeval_status, null, `${n} untouched by preview`);
+    }
+    assert.ok(urls.length > 0, "preview did read krill");
+    assert.deepEqual(
+      urls.filter((u) => !u.includes("/api/tasks/")),
+      [],
+      "preview talks to nothing but the krill task read",
+    );
+
+    // an operator-supplied result overrides the stale krill text
+    const run = await reevaluateSubtree(stubTeam as never, gate.id, { result: "CONTRADICTED: no-go" });
+    assert.equal(run.ok, true);
+    assert.ok((run.verdicts ?? []).length > 0, "verdicts written from the pasted result");
+  } finally {
+    globalThis.fetch = orig;
+    resetDb();
+  }
+});
+
+test("a second gate does not silently overwrite the first gate's unreviewed verdicts", async () => {
+  resetDb();
+  try {
+    // Two gates over one dependent — the whale board's actual shape. Both reach D
+    // because collectDescendants walks every edge, so without a guard the second
+    // run replaces the first's verdict and the operator never learns it happened.
+    const g1 = addProposed({ project_key: "demo-app", name: "G1", label: "g1" });
+    const g2 = addProposed({ project_key: "demo-app", name: "G2", label: "g2" });
+    const dep = addProposed({
+      project_key: "demo-app", name: "D", deps: ["G1", "G2"],
+      dep_types: { G1: "gate", G2: "gate" }, premise: "assumes GO on both",
+    });
+
+    const first = await reevaluateSubtree(stubTeam as never, g1.id, { result: "GO — proceed" });
+    assert.equal(first.ok, true);
+    const afterFirst = getProposed(dep.id)!;
+    assert.ok(afterFirst.reeval_status, "G1 wrote a verdict");
+    assert.equal(afterFirst.reeval_source, g1.id);
+    const verdictFromG1 = afterFirst.reeval_status;
+
+    // G2's preview warns BEFORE the model call
+    const pre = await reevaluateSubtree(stubTeam as never, g2.id, { preview: true, result: "x" });
+    assert.deepEqual(pre.dependents, ["D"], "D is in G2's subtree");
+    assert.equal(pre.skipped?.length, 1, "preview reports the collision");
+    assert.equal(pre.skipped![0].name, "D");
+    assert.equal(pre.skipped![0].heldBy, "G1", "named by gate, not by raw id");
+    assert.equal(pre.skipped![0].verdict, verdictFromG1);
+
+    // running G2 leaves the verdict alone and reports what it skipped
+    const second = await reevaluateSubtree(stubTeam as never, g2.id, { result: "CONTRADICTED: assumes GO on both" });
+    assert.equal(second.ok, true);
+    assert.deepEqual(second.verdicts, [], "nothing left to judge");
+    assert.equal(second.skipped?.length, 1, "collision reported on the real run too");
+    const untouched = getProposed(dep.id)!;
+    assert.equal(untouched.reeval_status, verdictFromG1, "first gate's verdict survives");
+    assert.equal(untouched.reeval_source, g1.id, "and still belongs to G1");
+
+    // explicit opt-in does replace it
+    const forced = await reevaluateSubtree(stubTeam as never, g2.id, {
+      result: "CONTRADICTED: assumes GO on both",
+      overwrite: true,
+    });
+    assert.deepEqual(forced.skipped, [], "nothing skipped when overwriting");
+    assert.equal(forced.verdicts?.length, 1, "D judged this time");
+    const replaced = getProposed(dep.id)!;
+    assert.equal(replaced.reeval_status, "kill", "premise contradicted by G2");
+    assert.equal(replaced.reeval_source, g2.id, "now owned by G2");
+
+    // a bare `pending` flag is not a verdict — it must never block a real one
+    updateProposed(dep.id, { reeval_status: "pending", reeval_source: g1.id, reeval_revision: null });
+    const overPending = await reevaluateSubtree(stubTeam as never, g2.id, { result: "GO — proceed" });
+    assert.deepEqual(overPending.skipped, [], "pending is a flag, not a judgement");
+    assert.equal(getProposed(dep.id)!.reeval_source, g2.id, "G2's verdict replaces the flag");
+  } finally {
+    resetDb();
+  }
 });

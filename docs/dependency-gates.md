@@ -36,6 +36,15 @@ lived it.
 | `"order"` | absent from `dep_types` (default) | The upstream's **artifact** is needed to start the downstream. Ordering only; no go/no-go semantics. |
 | `"gate"` | `dep_types[upstreamName] = "gate"` | The upstream's **result decides whether the downstream should exist**. A discovery, research, or go/no-go task. |
 
+Both fields are editable after the fact: the **Gates** button on an expanded
+proposal (any task with deps, not yet pushed) toggles each edge order↔gate and
+edits the premise, via `PATCH /api/proposed/:id`. The planner gets edge types
+wrong sometimes, and every dump distilled before `dep_types` existed reads as
+all-order — without an editor the only way to tag a gate was a direct DB write.
+The PATCH validates: a type on a name that is not one of the task's own deps is
+rejected (it would be invisible in the UI and silently wrong at push time), and
+the submitted map fully replaces the stored one.
+
 Missing key in `dep_types` always reads as `"order"` — every legacy edge is
 safe without backfill.
 
@@ -117,6 +126,7 @@ premise: r.premise?.trim() || t.premise,
   park→disabled=true                         reeval_note   → null
   kill→status=rejected                       reeval_source → null
   revise→patches name/desc/acceptance/deps   reeval_revision → null
+  ── both append the gate id to reeval_resolved, so the flag stays down ──
 ```
 
 Trigger 1 (automatic): `enrichPushed` is called on every Proposed tab load
@@ -125,10 +135,97 @@ as a side-effect, flips the `reeval_status` of every gate-dependent whose gate
 just landed DONE or CANCELED (`pipeline.ts:636-656`). No operator action needed
 to get the badge; it appears on next page load.
 
-Trigger 2 (manual): `POST /api/proposed/:gateId/reevaluate` runs
-`reevaluateSubtree` (`pipeline.ts:481-528`). This is what actually calls the
-model and writes the per-dependent verdict. The operator can also paste the gate
-result directly in the body (`opts.result`) when krill's result field is blank.
+Trigger 2 (manual): **Re-evaluate** — `POST /api/proposed/:gateId/reevaluate`
+running `reevaluateSubtree`. This is what actually calls the model and writes the
+per-dependent verdict.
+
+It runs from **two places, one handler**: the gate's own row, and the band on
+every flagged dependent. The band's button is the important one — it names the
+gate (`Re-evaluate MV-17 wedge-call`) and runs it from where the operator already
+is. Before, the band said "open MV-17 and hit Re-evaluate" in plain text, on a
+board where that row could be a screen away. Both surfaces gate on the same
+`gateHasOutcome()` predicate, so neither can offer what the other refuses, and
+the trigger name is a jump link to the gate's row.
+
+### Reviewing the outcome (`GateOutcomeDialog`)
+
+krill has no single "result" column, so `krill.getTaskOutcome` assembles one from
+`diff_text` (for a non-dev task the deliverable *is* the doc) plus the task's
+stage comments, and reports which of those it used as `source`. Metadata alone
+(name, acceptance) is deliberately NOT an outcome — evaluating against a stub
+produces confident nonsense — so it returns null and the operator pastes instead.
+
+`preview: true` returns that text, its provenance, krill's status, the dependent
+list and any collisions **without spending a model call**. The UI opens it in
+`GateOutcomeDialog`: the outcome in a half-viewport editor, where it came from,
+who will be judged, and one primary button. It is editable because krill's stored
+outcome can be stale — a research task marked DONE months before its findings
+land still reads as whatever diff it produced at the time, and a dozen downstream
+verdicts are only as good as this text.
+
+### Two gates over one subtree
+
+`collectDescendants` walks every edge, not just gate edges, so two gates over the
+same branch both reach the same tasks — the normal shape, not an edge case. A
+dependent already carrying a **real verdict** (not a bare `pending` flag) from a
+*different* gate is therefore skipped and returned in `skipped[]`, naming the
+gate that holds it. `preview` reports the collision up front so the dialog can
+say "6 of 14 already carry verdicts from MV-17"; replacing them is an explicit
+`overwrite: true` opt-in. Without this the second gate silently overwrote
+judgements the operator had not read yet.
+
+### Resolution is durable (`reeval_resolved`)
+
+Apply and dismiss both clear the verdict fields, so nothing in them can record
+that a gate was already dealt with. `reeval_resolved` — a JSON array of gate ids
+on the dependent — carries that fact instead. Without it two things break, and
+both did:
+
+- `enrichPushed` sees "gate DONE, no verdict" on the next poll (seconds later)
+  and re-stamps `pending`, undoing the operator's apply forever.
+- The push guard keyed on `reeval_status == null`, which is *also* the state
+  after a verdict is applied — so a resolved task was deferred permanently.
+
+The guard is now `unresolvedGates()` (`pipeline.ts`): a gate blocks the push
+while the verdict is `pending`, or while that gate's id is absent from
+`reeval_resolved`. A gate that hasn't finished yet is already blocked by ordinary
+dependency ordering, so this only has to cover "gate finished, verdict not
+resolved". Because the set is appended and never replaced, a task with two gate
+edges is re-evaluated once per gate and then settles instead of ping-ponging.
+
+The guard **fails open on an upstream that is not a proposal** — deleted, or an
+edge naming something never distilled. A gate with no row behind it can't be
+re-evaluated (no Re-evaluate button) and may carry no verdict band to dismiss, so
+failing closed would strand the dependent with no in-app way out. Ordinary
+dependency ordering still refuses a genuinely unsatisfied name; a gate that isn't
+there gates nothing.
+
+### One guard, shipped as data (`gated_by`)
+
+The UI must grey out exactly what the server refuses. It does not re-derive the
+rule: `withGateState` (`pipeline.ts`) runs `unresolvedGates` over every row and
+`GET /api/proposed` attaches the result as `gated_by` on **both** the `?sync=1`
+and plain paths. The UI's `unresolvedGates(p)` is `p.gated_by ?? []` and nothing
+more. A second copy of the rule drifts, and the visible failure is the UI
+offering a Push the server then defers. `withGateState` re-reads each row from
+the DB before checking, because callers routinely hold a copy taken before
+`enrichPushed` stamped `pending` on it.
+
+## Finding the work
+
+The board carries ~100 proposals and only a handful ever want a human. The
+Proposed tab is filtered by a lens bar — **Needs you · Ready · Blocked · All**,
+each with a live count — and opens on *Needs you* whenever that count is
+non-zero, without overriding a lens the operator picked.
+
+*Needs you* = a flag or verdict sitting on the task, **or** a finished gate whose
+subtree nobody has judged yet. That is the whole queue: five rows on a board of a
+hundred. A dump group whose every task finished in krill collapses by default
+(marked `all done`) — it is a receipt, not work. The sidebar badge counts flagged
+tasks rather than the total, since nobody acts on "104"; the total is in the
+tooltip. It is computed from the DB alone (`reeval_status != null`), so a gate
+that is merely *ready to run* — which needs krill's live status — is counted by
+the lens, not the badge.
 
 ## Why verdicts are never auto-applied
 
@@ -207,9 +304,11 @@ outcome being pushed into krill as if the outcome were decided when it isn't.
 | `reeval_note` | Why the verdict — which gate result or rejection triggered it, + model's reasoning. |
 | `reeval_source` | `id` of the gate task or rejected task that triggered re-evaluation. |
 | `reeval_revision` | JSON blob `{revised_name?, revised_description?, revised_acceptance?, revised_depends_on?}`. Written on `verdict=revise`, applied by `reeval-apply`, cleared by both apply and dismiss. |
-| `POST /api/proposed/:gateId/reevaluate` | Run the model against the gate result + dependents' premises; write per-dependent verdicts. Body: `{result?: string}` to override krill's result field. |
+| `reeval_resolved` | JSON array of gate ids already resolved for this task. Appended by apply/dismiss; survives the verdict being cleared. Stops the poll re-stamping and the push guard deferring forever. |
+| `POST /api/proposed/:gateId/reevaluate` | Run the model against the gate result + dependents' premises; write per-dependent verdicts. Body: `{result?}` overrides krill's outcome, `{preview:true}` reads it without a model call, `{overwrite:true}` re-judges dependents held by another gate. |
 | `POST /api/proposed/:depId/reeval-apply` | Apply the pending verdict. Sole writer of revised canonical fields. |
-| `POST /api/proposed/:depId/reeval-dismiss` | Clear the pending verdict stamp without applying. |
+| `POST /api/proposed/:depId/reeval-dismiss` | Clear the pending verdict stamp without applying. Counts as a resolution. |
+| `PATCH /api/proposed/:id` | Accepts `premise`, `dep_types` and `deps` (all full replacement, validated against the task's own edges and its project's tasks) — the Gates editor's endpoint. Dropping an edge drops its type with it. |
 
 ## Code map
 
@@ -224,7 +323,14 @@ outcome being pushed into krill as if the outcome were decided when it isn't.
 | `src/lib/pipeline.ts:531` | `reevalApply` — sole writer of revised canonical fields (keep/park/kill/revise branches). |
 | `src/lib/pipeline.ts:571` | `reevalDismiss` — clears the verdict stamp without applying. |
 | `src/lib/pipeline.ts:590` | `enrichPushed` — krill status sync; gate-completion detection loop at `:636-656` auto-flips `reeval_status` on observed DONE/CANCELED. |
-| `src/db/schema.ts:62` | `dep_types`, `premise`, `reeval_status`, `reeval_note`, `reeval_source`, `reeval_revision` columns. |
+| `src/lib/pipeline.ts` | `unresolvedGates` — the push guard: a gate blocks while the verdict is pending or its id is not in `reeval_resolved`; fails open when the upstream is not a proposal. |
+| `src/lib/pipeline.ts` | `withGateState` — attaches `gated_by` to each row (re-read from the DB) so the UI reads the guard instead of re-deriving it. |
+| `src/app/api/proposed/route.ts` | Attaches `gated_by` on both the `?sync=1` and plain list paths. |
+| `src/lib/pipeline.ts` | `heldByAnotherGate` — the anti-clobber rule: a real verdict from a different gate is skipped, a bare `pending` flag is not. |
+| `src/lib/krill-client.ts` | `getTaskOutcome` — assembles a gate outcome from `diff_text` + stage comments and reports which it used; `null` (→ operator paste) when neither exists. `getTaskResult` is its text-only view. |
+| `src/components/whale/gate-outcome-dialog.tsx` | `GateOutcomeDialog` — the outcome at readable size, its provenance, who gets judged, and the overlap opt-in. |
+| `src/components/whale/whale-app.tsx` | `gateHasOutcome` (one readiness rule for the gate row and every band), `ReevalBand` (the live action per flag state), `GatesEditor` (edges, types, premise), the lens bar. Reads `gated_by`; owns no gate rule of its own. |
+| `src/db/schema.ts:62` | `dep_types`, `premise`, `reeval_status`, `reeval_note`, `reeval_source`, `reeval_revision`, `reeval_resolved` columns. |
 | `tests/smoke.test.ts:447` | Round-trip test: typed dep edges + premise/reeval columns. |
 | `tests/smoke.test.ts:514` | Gate-edge push deferral + DONE-gate flip test (WH-17). |
 

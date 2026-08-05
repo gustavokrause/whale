@@ -77,6 +77,13 @@ export const proposedTasks = sqliteTable(
     // revised_acceptance?, revised_depends_on?) — written by reevaluate when
     // verdict=revise, applied by reeval-apply, cleared by both apply and dismiss.
     reeval_revision: text("reeval_revision"),
+    // JSON array of gate task ids whose resolution has already been handled for
+    // this task (appended by reeval-apply / reeval-dismiss). Durable on purpose:
+    // the verdict fields are cleared once resolved, so without this the poll
+    // would see "gate DONE, no verdict" and re-stamp pending forever, and the
+    // push guard would defer the task for good. One entry per gate, so a task
+    // with two gate edges is re-evaluated once per gate and then settles.
+    reeval_resolved: text("reeval_resolved").notNull().default("[]"),
     // Short handle (1-3 words, e.g. "stripe", "migration") for compact tracking
     // and dependency labels in the UI.
     label: text("label"),
