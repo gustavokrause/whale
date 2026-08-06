@@ -50,10 +50,13 @@ const pick = (k: OverrideKey) => (k in _overrides ? _overrides[k] : envDefaults[
 const pickBool = (k: OverrideKey) =>
   k in _overrides ? ovBool(_overrides[k]) : (envDefaults[k] as boolean);
 
-// Self-edit guard: env-only with a hard floor (whale + krill always protected).
-const PROTECTED_FLOOR = ["whale", "krill"];
+// Self-edit guard: env-only with a hard floor. bridge and ai-team are floored
+// alongside whale/krill: bridge is the control room that sets bypassPermissions
+// and boots the fleet, ai-team is the persona source every brain loads — a task
+// merging into either unattended has the same blast radius as a self-edit.
+const PROTECTED_FLOOR = ["whale", "krill", "bridge", "ai-team"];
 function protectedList(): string[] {
-  const env = (process.env.WHALE_PROTECTED || "whale,krill")
+  const env = (process.env.WHALE_PROTECTED || PROTECTED_FLOOR.join(","))
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);

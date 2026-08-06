@@ -90,6 +90,20 @@ test("autonomy ladder: dial controls how far a task bypasses (B1)", () => {
   assert.equal(bypass(med, "demo-app", "aggressive"), true);
 });
 
+test("self-edit floor covers the whole fleet — bridge/ai-team never bypass, even ludicrous", () => {
+  for (const key of ["whale", "krill", "bridge", "ai-team"]) {
+    const r = triage(stubTeam, { name: "small tweak", description: "", project_key: key }, "ludicrous");
+    assert.equal(r.risk_tier, "high", `${key}: self-edit is always high`);
+    assert.equal(r.bypass, false, `${key}: plan review never skipped`);
+    assert.equal(r.auto_publish, false, `${key}: never auto-finishes`);
+  }
+  // Sanity: an unprotected project on ludicrous DOES bypass — the floor is
+  // the exception, not a broken dial.
+  const open = triage(stubTeam, { name: "small tweak", description: "", project_key: "demo-app" }, "ludicrous");
+  assert.equal(open.bypass, true);
+  assert.equal(open.auto_publish, true);
+});
+
 test("flow preview reflects the gates a task will hit (B3)", () => {
   assert.match(flowPreview({ risk_tier: "high" }), /full review/);
   assert.match(flowPreview({ risk_tier: "low", auto_publish: true }), /auto-finish/);

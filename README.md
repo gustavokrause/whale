@@ -1,5 +1,8 @@
 # 🐋 whale
 
+> Part of the [AI-fleet](https://github.com/gustavokrause/bridge/blob/main/docs/PITCH.md)
+> — whale is the strategy layer. Start there for the full picture.
+
 The strategy brain on top of [krill](../krill). You dump **work requests** per
 project; whale plans them with the [ai-team](../ai-team) personas — grounded in
 each project's living **context** (seeded by onboarding, then grown by a
@@ -109,8 +112,13 @@ The `WHALE_BYPASS` dial sets how far a task runs before it reaches you:
   it's the reckless setting; only the self-edit guard still stops it.
 - **Warn, don't arm**: pushing auto-finish tasks to a project whose krill
   `allow_auto_finish` is OFF surfaces a warning (whale never patches krill).
-- **Self-edit guard** (`WHALE_PROTECTED`, default `whale,krill`): tasks targeting the
-  orchestrator itself are **always 🔴, never bypass/auto**, any dial.
+- **Self-edit guard** (`WHALE_PROTECTED`, default `whale,krill,bridge,ai-team` —
+  also the hard floor, env can only add): tasks targeting these are **always 🔴,
+  never bypass/auto**, any dial. Why bridge and ai-team ride the floor: bridge is
+  the control room that sets `bypassPermissions` and boots the fleet — a task
+  merging there unattended can rewrite the very scripts that arm autonomy; ai-team
+  is the persona source every brain hot-loads. Same blast radius as editing
+  whale/krill themselves.
 
 Other dials (env): `WHALE_AUTOPUSH=1` (auto-push approved), `WHALE_ALLOW_NEW_PROJECTS=1`
 (propose new projects — creation stays human-gated), `WHALE_PLAN_FILE_ACCESS=1`
