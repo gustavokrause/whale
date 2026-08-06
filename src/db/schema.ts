@@ -63,7 +63,7 @@ export const proposedTasks = sqliteTable(
     // edge reads as ordering without backfill). "gate" edges are premise edges:
     // the downstream only exists if the upstream returns a GO.
     dep_types: text("dep_types").notNull().default("{}"),
-    // The assumption the proposal rests on (e.g. "assumes GO on wedge bet").
+    // The assumption the proposal rests on (e.g. "assumes GO on the wedge bet").
     // NULL = unconditional.
     premise: text("premise"),
     // Proposed re-evaluation verdict after an upstream gate result. NEVER

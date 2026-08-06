@@ -10,7 +10,7 @@ to surface the consequences of a gate result — not to apply them automatically
 
 ## Why this exists
 
-whale's idea-project plan began with an interview-driven track: landing page →
+One project's plan began with an interview-driven track: landing page →
 copy → hero image → thank-you flow, all wired together. Interviews pivoted the
 strategy to a survey approach. The landing-page task got rejected. Under the old
 behavior, its four dependents were silently orphaned — the dep edge disappeared
@@ -266,7 +266,7 @@ dep stays visible so the operator can see exactly what's broken and decide: keep
 `reeval_status` machinery as the gate path — same badge, same apply/dismiss
 endpoints.
 
-This was the fix for the idea-project case (commit `e80824c`, WH-20): reject no
+This was the fix for that case (commit `e80824c`, WH-20): reject no
 longer orphans dependents silently; it flags them and leaves the evidence in
 place.
 
